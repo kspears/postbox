@@ -54,7 +54,10 @@ services:
 
   postbox:
     image: postbox:ci
-    build: ../..
+    build:
+      context: ../..
+      args:
+        GO_TAGS: citest # adds the test clock; never in a release image
     depends_on:
       - dovecot
       - postfix
@@ -64,6 +67,9 @@ services:
       POSTBOX_PUBLIC_URL: http://postbox.localhost
       POSTBOX_LISTEN: :80
       POSTBOX_CA_FILE: /ca/ca.crt
+      # The browser tests choose the address each test signs in from, so throttling tests do
+      # not block each other. Behind a real proxy this is the proxy's header.
+      POSTBOX_CLIENT_IP_HEADER: X-Test-Client-IP
     volumes:
       # Only the certificate: Postbox never sees the mail server's private keys.
       - ca:/ca:ro
@@ -112,6 +118,10 @@ services:
       - postbox
     environment:
       POSTBOX_URL: http://postbox.localhost
+      SEED_PASSWORD: ${SEED_PASSWORD:-}
+    volumes:
+      # Signed-in browser state kept across a Postbox restart.
+      - e2e_state:/e2e/.state
 
 volumes:
   keys:
@@ -121,5 +131,6 @@ volumes:
   vmail_index:
   postfix_queue:
   state:
+  e2e_state:
   go_cache:
   go_mod:

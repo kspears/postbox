@@ -13,6 +13,8 @@ RUN pnpm run build
 
 FROM --platform=$BUILDPLATFORM golang:1.27.3-trixie@sha256:af1bfc2614ebb1dbd31af514b78740fd678850e76498762b425ecee4c5c6ea80 AS build
 ARG TARGETOS TARGETARCH
+# Empty for a release. The test stack sets "citest", which adds endpoints only tests may have.
+ARG GO_TAGS=""
 WORKDIR /src
 COPY go.mod go.sum* ./
 RUN --mount=type=cache,target=/go/pkg/mod \
@@ -23,7 +25,7 @@ COPY --from=web /src/web/dist ./web/dist
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     GOOS=$TARGETOS GOARCH=$TARGETARCH CGO_ENABLED=0 \
-    go build -trimpath -ldflags="-s -w" -o /out/postbox ./cmd/postbox
+    go build -trimpath -ldflags="-s -w" -tags="$GO_TAGS" -o /out/postbox ./cmd/postbox
 # The final image has no shell to create the default state directory with.
 RUN mkdir -p /out/data/postbox
 

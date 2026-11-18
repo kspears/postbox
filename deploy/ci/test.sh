@@ -50,9 +50,23 @@ step "postbox starts with only the three required settings, and /healthz answers
 docker compose up --detach postbox-minimal
 # The browser image is the one container here with an HTTP client; its health test waits for
 # Postbox to listen, then expects 200 and "ok" on the default port.
-docker compose run --rm -T -e POSTBOX_URL=http://postbox-minimal:8080 e2e --grep "health check"
+docker compose run --rm -T -e POSTBOX_URL=http://postbox-minimal:8080 e2e --project main --grep "health check"
 
 step "browser tests"
-docker compose run --rm -T e2e
+docker compose run --rm -T e2e --project main --project restart-before
+
+step "criterion 2: the blocked sign-in never reached dovecot"
+# The throttling test failed five times from 203.0.113.20, then was blocked. Postbox passes the
+# address on with ID, so dovecot logs it as rip=. A sixth line would mean the block leaked.
+logins=$(docker compose logs --no-color dovecot | grep -c 'rip=203\.0\.113\.20,' || true)
+[ "$logins" = 5 ] || fail "dovecot saw $logins logins from 203.0.113.20, want 5"
+echo "dovecot saw 5 logins from 203.0.113.20"
+
+step "criterion 7: sessions survive a restart"
+docker compose restart postbox
+docker compose run --rm -T e2e --project restart-after
+
+step "criterion 7: session lifetimes (moves the clock, so last)"
+docker compose run --rm -T e2e --project clock
 
 printf '\nall checks passed\n'

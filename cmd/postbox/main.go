@@ -13,7 +13,12 @@ import (
 	"time"
 
 	"github.com/kspears/postbox/internal/api"
+	"github.com/kspears/postbox/internal/auth"
+	"github.com/kspears/postbox/internal/clock"
 	"github.com/kspears/postbox/internal/config"
+	"github.com/kspears/postbox/internal/mail"
+	"github.com/kspears/postbox/internal/session"
+	"github.com/kspears/postbox/internal/store"
 	"github.com/kspears/postbox/web"
 )
 
@@ -37,17 +42,41 @@ func serve() error {
 	if err != nil {
 		return err
 	}
+	server, err := mail.NewServer(cfg.IMAPAddr, cfg.CAFile)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(cfg.State, 0o700); err != nil {
+		return fmt.Errorf("POSTBOX_STATE: %w", err)
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	st, err := store.Open(ctx, cfg.State)
+	if err != nil {
+		return fmt.Errorf("POSTBOX_STATE: %w", err)
+	}
+	defer st.Close()
+
+	clk := &clock.Clock{}
+	sessions := session.NewManager(st, clk, cfg.PublicURL.Scheme == "https")
+
 	ln, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
 		return fmt.Errorf("cannot listen on POSTBOX_LISTEN: %w", err)
 	}
 	srv := &http.Server{
-		Handler:           api.NewHandler(web.Dist()),
+		Handler: api.NewHandler(web.Dist(), api.Deps{
+			Sessions:       sessions,
+			Auth:           auth.New(st, clk, server),
+			Clock:          clk,
+			Origin:         cfg.PublicURL.String(),
+			ClientIPHeader: cfg.ClientIPHeader,
+		}),
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       2 * time.Minute,
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	served := make(chan error, 1)
 	go func() { served <- srv.Serve(ln) }()
 
