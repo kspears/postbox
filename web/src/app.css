@@ -19,3 +19,18 @@
 body {
   margin: 0;
 }
+
+button,
+input {
+  font: inherit;
+}
+
+/* A message about something that went wrong, shown in place of the content it concerns. */
+.error-banner {
+  margin: 0;
+  padding: 0.6rem 0.75rem;
+  border-radius: 0.5rem;
+  background: var(--danger-bg);
+  color: var(--danger);
+  font-size: 0.9rem;
+}

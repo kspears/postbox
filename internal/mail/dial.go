@@ -75,6 +75,14 @@ func (s *Server) Login(ctx context.Context, clientIP netip.Addr, account, passwo
 	return c, nil
 }
 
+// Logout ends a session politely, giving the server five seconds to answer, and closes it.
+func (s *Server) Logout(c *imapclient.Client) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	waitCtx(ctx, c, c.Logout().Wait)
+	c.Close()
+}
+
 // serverSide reports response codes that blame the server, not the credentials (RFC 5530).
 func serverSide(code imap.ResponseCode) bool {
 	switch code {
@@ -101,7 +109,7 @@ func (s *Server) dial(ctx context.Context, clientIP netip.Addr) (*imapclient.Cli
 	}
 	conn.SetDeadline(deadline)
 
-	r := bufio.NewReader(conn)
+	r := bufio.NewReaderSize(conn, 8192)
 	greeting, err := readLine(r)
 	if err != nil {
 		conn.Close()
@@ -125,8 +133,9 @@ func (s *Server) dial(ctx context.Context, clientIP netip.Addr) (*imapclient.Cli
 // sendID sends `ID` with the client's address and waits for the server's tagged answer. A
 // server without ID support answers BAD, which is fine: it just does not learn the address.
 func sendID(w io.Writer, r *bufio.Reader, clientIP netip.Addr) error {
-	// netip.Addr.String never contains a quote or backslash, so it is a safe quoted string.
-	cmd := fmt.Sprintf("pbid ID (\"name\" \"Postbox\" \"x-originating-ip\" \"%s\")\r\n", clientIP.Unmap())
+	// Without its zone (which may hold any text), an address prints as digits, dots and colons
+	// only, so it is safe inside a quoted string.
+	cmd := fmt.Sprintf("pbid ID (\"name\" \"Postbox\" \"x-originating-ip\" \"%s\")\r\n", clientIP.Unmap().WithZone(""))
 	if _, err := io.WriteString(w, cmd); err != nil {
 		return fmt.Errorf("ID: %w", err)
 	}
@@ -142,22 +151,13 @@ func sendID(w io.Writer, r *bufio.Reader, clientIP netip.Addr) error {
 	return errors.New("ID: no answer after 20 lines")
 }
 
-// readLine reads one CRLF-terminated line of at most 8 KiB.
+// readLine reads one CRLF-terminated line; r's buffer size is the longest line accepted.
 func readLine(r *bufio.Reader) (string, error) {
-	var b strings.Builder
-	for {
-		chunk, err := r.ReadSlice('\n')
-		b.Write(chunk)
-		if b.Len() > 8192 {
-			return "", errors.New("line too long")
-		}
-		if err == nil {
-			return b.String(), nil
-		}
-		if !errors.Is(err, bufio.ErrBufferFull) {
-			return "", err
-		}
+	line, err := r.ReadSlice('\n')
+	if errors.Is(err, bufio.ErrBufferFull) {
+		return "", errors.New("line too long")
 	}
+	return string(line), err
 }
 
 // replayConn is a connection whose first reads come from bytes already read off it.

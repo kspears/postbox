@@ -148,6 +148,8 @@ func TestClientIP(t *testing.T) {
 		{[]string{"garbage"}, "192.0.2.1:5000", "192.0.2.1"},
 		{[]string{"::ffff:203.0.113.9"}, "192.0.2.1:5000", "203.0.113.9"},
 		{nil, "[2001:db8::1]:5000", "2001:db8::1"},
+		// A zone can hold any text, quotes included; it must never reach the mail server.
+		{[]string{`fe80::1%x" "x-forward-user" "admin`}, "192.0.2.1:5000", "fe80::1"},
 	}
 	for _, tt := range tests {
 		r := httptest.NewRequest("GET", "/", nil)

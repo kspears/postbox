@@ -54,7 +54,7 @@ func (a *apiHandler) clientIP(r *http.Request) netip.Addr {
 			last := v[len(v)-1]
 			last = strings.TrimSpace(last[strings.LastIndexByte(last, ',')+1:])
 			if ip, err := netip.ParseAddr(last); err == nil {
-				return ip.Unmap()
+				return ip.Unmap().WithZone("")
 			}
 		}
 	}
@@ -63,7 +63,7 @@ func (a *apiHandler) clientIP(r *http.Request) netip.Addr {
 		host = r.RemoteAddr
 	}
 	ip, _ := netip.ParseAddr(host)
-	return ip.Unmap()
+	return ip.Unmap().WithZone("")
 }
 
 type signInRequest struct {
@@ -112,8 +112,8 @@ func (a *apiHandler) withSession(next sessionHandler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		s, err := a.Sessions.FromRequest(r)
 		if errors.Is(err, session.ErrNoSession) {
-			if _, cookieErr := r.Cookie(a.Sessions.Clear().Name); cookieErr == nil {
-				http.SetCookie(w, a.Sessions.Clear())
+			if clear := a.Sessions.Clear(); hasCookie(r, clear.Name) {
+				http.SetCookie(w, clear)
 			}
 			writeError(w, http.StatusUnauthorized, errSignedOut)
 			return
@@ -126,6 +126,11 @@ func (a *apiHandler) withSession(next sessionHandler) http.HandlerFunc {
 	}
 }
 
+func hasCookie(r *http.Request, name string) bool {
+	_, err := r.Cookie(name)
+	return err == nil
+}
+
 type whoAmI struct {
 	Account string `json:"account"`
 	Method  string `json:"method"`
@@ -135,22 +140,19 @@ func (a *apiHandler) whoAmI(w http.ResponseWriter, _ *http.Request, s *session.S
 	writeJSON(w, http.StatusOK, whoAmI{Account: s.Account, Method: s.Method})
 }
 
-func (a *apiHandler) signOut(w http.ResponseWriter, r *http.Request, s *session.Session) {
-	cookie, err := a.Sessions.End(r.Context(), s)
-	if err != nil {
-		internalError(w, r, err)
-		return
+// signOut ends this session, or with everywhere every session of the account.
+func (a *apiHandler) signOut(everywhere bool) sessionHandler {
+	end := a.Sessions.End
+	if everywhere {
+		end = a.Sessions.EndAll
 	}
-	http.SetCookie(w, cookie)
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (a *apiHandler) signOutEverywhere(w http.ResponseWriter, r *http.Request, s *session.Session) {
-	cookie, err := a.Sessions.EndAll(r.Context(), s)
-	if err != nil {
-		internalError(w, r, err)
-		return
+	return func(w http.ResponseWriter, r *http.Request, s *session.Session) {
+		cookie, err := end(r.Context(), s)
+		if err != nil {
+			internalError(w, r, err)
+			return
+		}
+		http.SetCookie(w, cookie)
+		w.WriteHeader(http.StatusNoContent)
 	}
-	http.SetCookie(w, cookie)
-	w.WriteHeader(http.StatusNoContent)
 }

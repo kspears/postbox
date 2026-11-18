@@ -1,6 +1,7 @@
 // The browser side of Postbox's HTTP API. Failures come back as error codes, never as text.
 
-export type ErrorCode = 'wrong_credentials' | 'throttled' | 'unreachable' | 'internal';
+const knownErrors = ['wrong_credentials', 'throttled', 'unreachable', 'internal'] as const;
+export type ErrorCode = (typeof knownErrors)[number];
 
 export interface Account {
   account: string;
@@ -8,8 +9,6 @@ export interface Account {
 }
 
 export type Result<T> = { ok: true; value: T } | { ok: false; error: ErrorCode };
-
-const knownErrors: readonly ErrorCode[] = ['wrong_credentials', 'throttled', 'unreachable', 'internal'];
 
 async function call(method: string, path: string, body?: unknown): Promise<Response> {
   return fetch(path, {
@@ -48,6 +47,12 @@ export async function signIn(email: string, password: string, keep: boolean): Pr
   }
 }
 
-export async function signOut(everywhere: boolean): Promise<void> {
-  await call('DELETE', everywhere ? '/api/sessions' : '/api/session');
+/** True once the server has ended the session(s); a session that was already gone counts. */
+export async function signOut(everywhere: boolean): Promise<boolean> {
+  try {
+    const response = await call('DELETE', everywhere ? '/api/sessions' : '/api/session');
+    return response.ok || response.status === 401;
+  } catch {
+    return false;
+  }
 }

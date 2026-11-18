@@ -5,8 +5,10 @@ package auth
 import (
 	"context"
 	"errors"
+	"log"
 	"net/netip"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kspears/postbox/internal/clock"
@@ -27,6 +29,10 @@ const (
 	block           = 15 * time.Minute
 	maxPerAccountIP = 5
 	maxPerIP        = 20
+
+	// The longest a sign-in may wait for the mail server. It also bounds how long one slow
+	// attempt holds up the next from the same IP.
+	loginTimeout = 30 * time.Second
 )
 
 // Authenticator signs people in.
@@ -34,6 +40,10 @@ type Authenticator struct {
 	store  *store.Store
 	clock  *clock.Clock
 	server *mail.Server
+	// One attempt at a time per client IP: checking the block, asking the mail server and
+	// recording the result happen as one step, so parallel requests cannot all slip past the
+	// check before the first failure is written.
+	inFlight keyedMutex
 }
 
 // New returns an Authenticator.
@@ -46,13 +56,25 @@ func Account(email string) string {
 	return strings.ToLower(strings.TrimSpace(email))
 }
 
+// throttleKey is the address the limits count against. An IPv6 address counts as its /64,
+// because one ordinary connection is given a whole /64 and could otherwise use a fresh address
+// for every attempt.
+func throttleKey(ip netip.Addr) string {
+	ip = ip.Unmap().WithZone("")
+	if ip.Is6() {
+		return netip.PrefixFrom(ip, 64).Masked().String()
+	}
+	return ip.String()
+}
+
 // CheckPassword confirms account and password with the mail server. The error is
 // ErrThrottled, ErrWrongPassword, or wraps mail.ErrUnreachable.
 func (a *Authenticator) CheckPassword(ctx context.Context, clientIP netip.Addr, account, password string) error {
-	ip := clientIP.Unmap().String()
-	pairKey, ipKey := account+" "+ip, ip
+	ip := throttleKey(clientIP)
+	unlock := a.inFlight.lock(ip)
+	defer unlock()
 
-	blocked, err := a.store.Blocked(ctx, a.clock.Now(), pairKey, ipKey)
+	blocked, err := a.store.Blocked(ctx, a.clock.Now(), account, ip)
 	if err != nil {
 		return err
 	}
@@ -60,28 +82,69 @@ func (a *Authenticator) CheckPassword(ctx context.Context, clientIP netip.Addr, 
 		return ErrThrottled
 	}
 	if account == "" || password == "" {
-		return a.fail(ctx, account, ip, pairKey, ipKey)
+		return a.fail(ctx, account, ip)
 	}
 
-	c, err := a.server.Login(ctx, clientIP, account, password)
+	loginCtx, cancel := context.WithTimeout(ctx, loginTimeout)
+	defer cancel()
+	c, err := a.server.Login(loginCtx, clientIP, account, password)
 	if errors.Is(err, mail.ErrRefused) {
-		return a.fail(ctx, account, ip, pairKey, ipKey)
+		return a.fail(ctx, account, ip)
 	}
 	if err != nil {
 		return err
 	}
-	c.Logout().Wait()
-	c.Close()
-	return a.store.ClearFailures(ctx, account, ip)
+	a.server.Logout(c)
+	// The password is right; failing to tidy the counters must not turn that into an error.
+	if err := a.store.ClearFailures(context.WithoutCancel(ctx), account, ip); err != nil {
+		log.Printf("sign-in: clear failures: %v", err)
+	}
+	return nil
 }
 
-func (a *Authenticator) fail(ctx context.Context, account, ip, pairKey, ipKey string) error {
-	err := a.store.RecordFailure(ctx, a.clock.Now(), account, ip,
-		store.FailureLimit{Key: pairKey, Account: account, Max: maxPerAccountIP, Window: window, Block: block},
-		store.FailureLimit{Key: ipKey, Max: maxPerIP, Window: window, Block: block},
-	)
+func (a *Authenticator) fail(ctx context.Context, account, ip string) error {
+	// The mail server has answered; the failure counts even if the browser has gone away.
+	err := a.store.RecordFailure(context.WithoutCancel(ctx), a.clock.Now(), account, ip, store.Limits{
+		PerAccountIP: maxPerAccountIP, PerIP: maxPerIP, Window: window, Block: block,
+	})
 	if err != nil {
 		return err
 	}
 	return ErrWrongPassword
+}
+
+// keyedMutex is a set of mutexes created on demand and dropped when no one holds or waits for
+// them.
+type keyedMutex struct {
+	mu    sync.Mutex
+	locks map[string]*keyedLock
+}
+
+type keyedLock struct {
+	sync.Mutex
+	users int
+}
+
+func (k *keyedMutex) lock(key string) (unlock func()) {
+	k.mu.Lock()
+	if k.locks == nil {
+		k.locks = map[string]*keyedLock{}
+	}
+	l := k.locks[key]
+	if l == nil {
+		l = &keyedLock{}
+		k.locks[key] = l
+	}
+	l.users++
+	k.mu.Unlock()
+
+	l.Lock()
+	return func() {
+		l.Unlock()
+		k.mu.Lock()
+		if l.users--; l.users == 0 {
+			delete(k.locks, key)
+		}
+		k.mu.Unlock()
+	}
 }

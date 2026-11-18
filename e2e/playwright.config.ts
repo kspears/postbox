@@ -10,7 +10,7 @@ export default defineConfig({
   globalSetup: './global-setup.ts',
   forbidOnly: !!process.env.CI,
   reporter: 'list',
-  // One at a time: the tests share one Postbox, and some move its clock.
+  // One at a time: the tests share accounts, and signing out everywhere ends every session of one.
   workers: 1,
   outputDir: './.state/test-results',
   use: {

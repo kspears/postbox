@@ -59,7 +59,6 @@ func serve() error {
 
 	clk := &clock.Clock{}
 	sessions := session.NewManager(st, clk, cfg.PublicURL.Scheme == "https")
-	go pruneSessions(ctx, sessions)
 
 	ln, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
@@ -74,6 +73,8 @@ func serve() error {
 			ClientIPHeader: cfg.ClientIPHeader,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       2 * time.Minute,
 	}
 
 	served := make(chan error, 1)
@@ -89,19 +90,4 @@ func serve() error {
 	drain, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return srv.Shutdown(drain)
-}
-
-// pruneSessions deletes expired sessions now and every hour. Expired ones are already refused;
-// this only keeps the table small.
-func pruneSessions(ctx context.Context, sessions *session.Manager) {
-	for {
-		if err := sessions.Prune(ctx); err != nil && ctx.Err() == nil {
-			log.Printf("prune sessions: %v", err)
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(time.Hour):
-		}
-	}
 }

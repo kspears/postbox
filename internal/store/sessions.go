@@ -20,8 +20,11 @@ type Session struct {
 	ExpiresAt time.Time
 }
 
-// CreateSession stores a new session.
+// CreateSession stores a new session, and deletes sessions that expired before it.
 func (s *Store) CreateSession(ctx context.Context, ses Session) error {
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE expires_at <= ?`, ses.CreatedAt.Unix()); err != nil {
+		return err
+	}
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO sessions (id, account, sealed, method, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)`,
 		ses.ID, ses.Account, ses.Sealed, ses.Method, ses.CreatedAt.Unix(), ses.ExpiresAt.Unix())
@@ -51,11 +54,5 @@ func (s *Store) DeleteSession(ctx context.Context, id string) error {
 // DeleteAccountSessions removes every session of account.
 func (s *Store) DeleteAccountSessions(ctx context.Context, account string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE account = ?`, account)
-	return err
-}
-
-// DeleteExpiredSessions removes sessions that expired at or before now.
-func (s *Store) DeleteExpiredSessions(ctx context.Context, now time.Time) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE expires_at <= ?`, now.Unix())
 	return err
 }

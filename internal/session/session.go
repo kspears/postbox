@@ -68,10 +68,8 @@ func NewManager(st *store.Store, clk *clock.Clock, secure bool) *Manager {
 // Create starts a session for account and returns the cookie that carries it. keep is the
 // "Keep me signed in" box; passkey sessions always last long.
 func (m *Manager) Create(ctx context.Context, account, password, method string, keep bool) (*http.Cookie, error) {
-	id, key := make([]byte, 16), make([]byte, 32)
-	rand.Read(id)
+	idText, key := rand.Text(), make([]byte, 32)
 	rand.Read(key)
-	idText := base64.RawURLEncoding.EncodeToString(id)
 
 	sealed, err := seal(key, idText, account, password)
 	if err != nil {
@@ -150,11 +148,6 @@ func (m *Manager) Clear() *http.Cookie {
 	c := m.newCookie("")
 	c.MaxAge = -1
 	return c
-}
-
-// Prune deletes expired sessions.
-func (m *Manager) Prune(ctx context.Context) error {
-	return m.store.DeleteExpiredSessions(ctx, m.clock.Now())
 }
 
 func (m *Manager) newCookie(value string) *http.Cookie {

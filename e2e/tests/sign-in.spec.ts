@@ -65,8 +65,6 @@ test.describe('criterion 2: throttling', () => {
 });
 
 test.describe('signing out', () => {
-  test.use(fromIP('203.0.113.40'));
-
   test('sign out ends this browser only', async ({ browser }) => {
     const [one, two] = await Promise.all([browser.newContext(fromIP('203.0.113.40')), browser.newContext(fromIP('203.0.113.40'))]);
     const [a, b] = await Promise.all([one.newPage(), two.newPage()]);

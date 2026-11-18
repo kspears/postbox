@@ -9,11 +9,18 @@
   const { account, onSignedOut }: Props = $props();
 
   let menuOpen = $state(false);
+  let signOutFailed = $state(false);
 
+  // The sign-in screen appears only once the server confirms: showing it after a failed
+  // "Sign out everywhere" would let someone believe a stolen session had ended.
   async function leave(everywhere: boolean): Promise<void> {
     menuOpen = false;
-    await signOut(everywhere);
-    onSignedOut();
+    signOutFailed = false;
+    if (await signOut(everywhere)) {
+      onSignedOut();
+      return;
+    }
+    signOutFailed = true;
   }
 
   function closeOnEscape(event: KeyboardEvent): void {
@@ -47,6 +54,9 @@
   </header>
 
   <main>
+    {#if signOutFailed}
+      <p class="error-banner" role="alert">{strings.account.signOutFailed}</p>
+    {/if}
     <h1>{strings.folders.inbox}</h1>
     <p>{strings.inboxComingSoon}</p>
   </main>
@@ -78,7 +88,6 @@
   }
 
   .account-button {
-    font: inherit;
     font-size: 0.9rem;
     color: var(--text);
     background: transparent;
@@ -106,7 +115,6 @@
   }
 
   .menu button {
-    font: inherit;
     text-align: left;
     color: var(--text);
     background: transparent;
@@ -124,6 +132,10 @@
 
   main {
     padding: 1.5rem 1rem;
+  }
+
+  .error-banner {
+    margin-bottom: 1rem;
   }
 
   h1 {

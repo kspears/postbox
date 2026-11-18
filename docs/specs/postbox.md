@@ -603,6 +603,8 @@ performance panel, median of five tries.
 | Mail server unreachable | Banner, read-only, no offline mode | Stateless design | agent default |
 | Login throttling | 5 failures in 15 minutes blocks that address from that IP for 15 minutes | Slows guessing without locking out the real user elsewhere | agent default |
 | Login throttling per IP | 20 failures from one IP across all addresses in 15 minutes blocks that IP for 15 minutes | One IP guessing across many addresses is slowed too | user |
+| "IP" for an IPv6 client | Its /64 network | One ordinary IPv6 connection is given a whole /64; counting single addresses would let one person make every attempt from a fresh address | agent default |
+| Session cookie on a local `http://` address | Not `Secure` and without the `__Host-` prefix; both apply whenever `POSTBOX_PUBLIC_URL` is `https://` | Safari does not keep `Secure` cookies on `http://localhost`, which would break local runs; nothing but localhost names may use `http://` | agent default |
 | Real client IP passed to the mail server | Yes, when the server trusts Postbox | One attacker must not get every user blocked | agent default |
 | Speed targets | 1 s open, 2 s search, 5 s new mail | "A user should not be waiting" | user |
 | "Instant" for actions | Within 100 milliseconds | Makes the target measurable | agent default |

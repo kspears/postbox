@@ -50,7 +50,7 @@
     </label>
 
     {#if error}
-      <p class="error" role="alert">{strings.errors[error]}</p>
+      <p class="error-banner" role="alert">{strings.errors[error]}</p>
     {/if}
 
     <button type="submit" disabled={working}>
@@ -102,7 +102,6 @@
 
   input[type='email'],
   input[type='password'] {
-    font: inherit;
     font-size: 1rem;
     color: var(--text);
     background: var(--bg);
@@ -129,17 +128,7 @@
     accent-color: var(--accent);
   }
 
-  .error {
-    margin: 0;
-    padding: 0.6rem 0.75rem;
-    border-radius: 0.5rem;
-    background: var(--danger-bg);
-    color: var(--danger);
-    font-size: 0.9rem;
-  }
-
   button {
-    font: inherit;
     font-weight: 600;
     padding: 0.65rem 1rem;
     border: none;

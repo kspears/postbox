@@ -23,6 +23,7 @@ export const strings = {
     menu: 'Account',
     signOut: 'Sign out',
     signOutEverywhere: 'Sign out everywhere',
+    signOutFailed: "Couldn't sign out. Try again.",
   },
 
   folders: {
