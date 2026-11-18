@@ -1,8 +1,16 @@
 :root {
   color-scheme: light dark;
-  --bg: light-dark(#fbfbfa, #151617);
+  --bg: light-dark(#f6f6f4, #141516);
+  --surface: light-dark(#ffffff, #1e1f21);
   --text: light-dark(#1b1c1e, #ececec);
-  --text-muted: light-dark(#6b6f76, #9a9da3);
+  --text-muted: light-dark(#62666d, #9a9da3);
+  --border: light-dark(#dcdcd8, #34363a);
+  --hover: light-dark(#efefec, #2a2c2f);
+  --accent: light-dark(#2f5bd3, #7b9cff);
+  --on-accent: light-dark(#ffffff, #0d1430);
+  --danger: light-dark(#a8261b, #ff9b8f);
+  --danger-bg: light-dark(#fdecea, #3a1f1c);
+  --shadow: 0 1px 2px light-dark(#0000000f, #00000066), 0 8px 24px light-dark(#0000000d, #00000059);
   font-family: system-ui, sans-serif;
   background: var(--bg);
   color: var(--text);

@@ -3,7 +3,7 @@
 A web mail client in one container. Postbox talks IMAP and SMTP submission to the mail server
 you already run and keeps no copy of your mail.
 
-Status: early development. The server starts and serves an empty page; nothing else works yet.
+Status: early development. Signing in and out works; there is no mail to read yet.
 The specification is [docs/specs/postbox.md](docs/specs/postbox.md).
 
 ## Configuration
@@ -38,8 +38,8 @@ just test    # Go unit tests
 just check   # everything CI runs, including the browser tests in containers
 ```
 
-`just dev` prints the seeded accounts; their password is generated on first run and kept in
-`deploy/ci/.dev/password`. `just dev-down` stops the stack and keeps its mail.
+`just dev` prints the seeded accounts (`alice@example.test`, `bob@example.test`); their password
+is generated on first run and kept in `deploy/ci/.dev/password`. `just dev-down` stops the stack and keeps its mail.
 
 ## Licence
 
