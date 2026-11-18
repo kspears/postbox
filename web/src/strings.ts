@@ -9,6 +9,7 @@ export const strings = {
     keep: 'Keep me signed in',
     submit: 'Sign in',
     working: 'Signing in…',
+    passwordChanged: 'Your password has changed. Sign in again.',
   },
 
   // Keyed by the error codes the server sends.
@@ -19,6 +20,9 @@ export const strings = {
     internal: 'Something went wrong. Try again.',
   },
 
+  unreachableBanner: "Can't reach the mail server. Retrying…",
+  failedBanner: 'Something went wrong. Retrying…',
+
   account: {
     menu: 'Account',
     signOut: 'Sign out',
@@ -27,8 +31,22 @@ export const strings = {
   },
 
   folders: {
-    inbox: 'Inbox',
+    heading: 'Folders',
+    unread: (n: number) => `${n} unread`,
+    missing: 'This folder no longer exists.',
   },
 
-  inboxComingSoon: 'Your mail will appear here.',
+  list: {
+    empty: 'No conversations here.',
+    loading: 'Loading…',
+    noSubject: '(no subject)',
+    unread: 'Unread',
+    flagged: 'Flagged',
+    attachment: 'Has attachments',
+    messages: (n: number) => `${n} messages`,
+  },
+
+  reading: {
+    nothingSelected: 'Select a conversation to read it.',
+  },
 } as const;

@@ -68,6 +68,7 @@ func serve() error {
 		Handler: api.NewHandler(web.Dist(), api.Deps{
 			Sessions:       sessions,
 			Auth:           auth.New(st, clk, server),
+			Mail:           mail.NewPool(ctx, server, clk.Now),
 			Clock:          clk,
 			Origin:         cfg.PublicURL.String(),
 			ClientIPHeader: cfg.ClientIPHeader,

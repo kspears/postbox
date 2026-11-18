@@ -3,9 +3,10 @@
   import { strings } from './strings';
 
   interface Props {
+    notice?: 'password_changed';
     onSignedIn: (account: Account) => void;
   }
-  const { onSignedIn }: Props = $props();
+  const { notice, onSignedIn }: Props = $props();
 
   let email = $state('');
   let password = $state('');
@@ -33,6 +34,10 @@
     <p class="brand">{strings.appName}</p>
     <h1 id="sign-in-title">{strings.signIn.title}</h1>
 
+    {#if notice === 'password_changed' && !error}
+      <p class="notice" role="status">{strings.signIn.passwordChanged}</p>
+    {/if}
+
     <label>
       <span>{strings.signIn.email}</span>
       <!-- svelte-ignore a11y_autofocus -->
@@ -50,7 +55,7 @@
     </label>
 
     {#if error}
-      <p class="error-banner" role="alert">{strings.errors[error]}</p>
+      <p class="error-banner" role="alert">{strings.errors[error as keyof typeof strings.errors] ?? strings.errors.internal}</p>
     {/if}
 
     <button type="submit" disabled={working}>
@@ -77,6 +82,14 @@
     background: var(--surface);
     box-shadow: var(--shadow);
     box-sizing: border-box;
+  }
+
+  .notice {
+    margin: 0;
+    padding: 0.6rem 0.75rem;
+    border-radius: 0.5rem;
+    background: var(--hover);
+    font-size: 0.9rem;
   }
 
   .brand {

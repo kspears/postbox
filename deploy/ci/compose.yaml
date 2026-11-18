@@ -109,6 +109,25 @@ services:
       - go_cache:/root/.cache/go-build
       - go_mod:/go/pkg/mod
 
+  # Postbox without POSTBOX_CA_FILE: the mail server's certificate comes from an authority it
+  # does not know, so every sign-in must fail with "Can't reach the mail server."
+  postbox-untrusted:
+    image: postbox:ci
+    pull_policy: never # built by the postbox service above
+    profiles: [tools]
+    depends_on:
+      - dovecot
+    environment:
+      POSTBOX_IMAP_ADDR: dovecot:993
+      POSTBOX_SMTP_ADDR: postfix:465
+      POSTBOX_PUBLIC_URL: http://postbox-untrusted.localhost
+      POSTBOX_LISTEN: :80
+      POSTBOX_CLIENT_IP_HEADER: X-Test-Client-IP
+    networks:
+      default:
+        aliases:
+          - postbox-untrusted.localhost
+
   # Playwright with Chromium. Run with `docker compose run --rm e2e`.
   e2e:
     image: postbox-ci-e2e

@@ -5,6 +5,7 @@
 
   // undefined while the first check is in flight, so neither screen flashes.
   let account = $state<Account | null | undefined>(undefined);
+  let notice = $state<'password_changed' | undefined>(undefined);
 
   currentAccount().then(
     (found) => (account = found),
@@ -13,7 +14,19 @@
 </script>
 
 {#if account === null}
-  <SignIn onSignedIn={(a) => (account = a)} />
+  <SignIn
+    {notice}
+    onSignedIn={(a) => {
+      notice = undefined;
+      account = a;
+    }}
+  />
 {:else if account}
-  <Shell {account} onSignedOut={() => (account = null)} />
+  <Shell
+    {account}
+    onSignedOut={(reason) => {
+      notice = reason;
+      account = null;
+    }}
+  />
 {/if}

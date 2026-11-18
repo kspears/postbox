@@ -34,6 +34,7 @@ func newHandler(t *testing.T, dist fs.FS) http.Handler {
 	return NewHandler(dist, Deps{
 		Sessions:       session.NewManager(st, clk, true),
 		Auth:           auth.New(st, clk, server),
+		Mail:           mail.NewPool(t.Context(), server, clk.Now),
 		Clock:          clk,
 		Origin:         origin,
 		ClientIPHeader: "X-Real-IP",

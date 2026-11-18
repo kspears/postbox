@@ -33,6 +33,15 @@ wait "$pull" || fail "could not pull the pinned images"
 step "start the stack and seed the mailboxes"
 docker compose up --detach
 ./seed.sh
+# 60 one-message conversations for the paging test: more than one page of 50. Written straight
+# into the mailbox; the dovecot image has a shell with printf and nothing else.
+docker compose exec -T dovecot sh -c '
+	i=1
+	while [ $i -le 60 ]; do
+		printf "From: Sender %d <sender%d@example.org>\r\nTo: paging@example.test\r\nSubject: Paging %02d\r\nMessage-ID: <paging-%d@example.org>\r\nDate: Mon, 2 Nov 2026 %02d:%02d:00 +0000\r\n\r\nMessage %d.\r\n" $i $i $i $i $((i / 60)) $((i % 60)) $i |
+			doveadm save -u paging@example.test -m INBOX || exit 1
+		i=$((i + 1))
+	done'
 
 step "the seeded accounts can sign in to dovecot, and a wrong password cannot"
 docker compose exec -T -e SEED_PASSWORD dovecot sh -c 'doveadm auth test alice@example.test "$SEED_PASSWORD"' >/dev/null ||
@@ -62,7 +71,15 @@ logins=$(docker compose logs --no-color dovecot | grep -c 'rip=203\.0\.113\.20,'
 [ "$logins" = 5 ] || fail "dovecot saw $logins logins from 203.0.113.20, want 5"
 echo "dovecot saw 5 logins from 203.0.113.20"
 
-step "criterion 7: sessions survive a restart"
+step "criterion 28: an untrusted mail-server certificate stops sign-in"
+docker compose up --detach postbox-untrusted
+docker compose run --rm -T -e POSTBOX_URL=http://postbox-untrusted.localhost e2e --project untrusted
+docker compose logs --no-color postbox-untrusted | grep -q 'certificate' || fail "postbox-untrusted did not log the certificate error"
+
+step "criterion 7: sessions survive a restart; a changed password signs the session out"
+# The accounts file lives in a volume; the init image has sed.
+docker compose run --rm --no-deps -T --entrypoint sh init -c \
+	'sed -i "s/^changer@example.test:{PLAIN}.*/changer@example.test:{PLAIN}changed-$(date +%s)::::::/" /auth/users'
 docker compose restart postbox
 docker compose run --rm -T e2e --project restart-after
 
