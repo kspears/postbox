@@ -1,0 +1,103 @@
+# The test stack: a real dovecot and postfix, Postbox in front of them, and a browser. Used by
+# deploy/ci/test.sh and, with compose.dev.yaml on top, by `just dev`. Every image is pinned by
+# tag and digest.
+#
+# Nothing is published to the host here; the tests run from a container on the compose
+# network. SEED_PASSWORD is the password of both seeded accounts and comes from the caller.
+name: postbox-ci
+
+services:
+  # Generates the throwaway keys, fixes volume ownership and writes the accounts file.
+  init:
+    image: postbox-ci-postfix
+    pull_policy: never # built by the postfix service below
+    entrypoint: ["sh", "/init.sh"]
+    environment:
+      SEED_PASSWORD: ${SEED_PASSWORD:-}
+    volumes:
+      - ./init.sh:/init.sh:ro
+      - keys:/keys
+      - ca:/ca
+      - auth:/auth
+      - vmail:/var/vmail
+      - vmail_index:/var/vmail_index
+    restart: "no"
+
+  dovecot:
+    image: dovecot/dovecot:2.4.5-root@sha256:e4e02686612ef57bce02ada4771e4a46dab7592e3e0498cccfcf2227138e26a9
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    volumes:
+      - ./dovecot:/etc/dovecot:ro
+      - keys:/keys:ro
+      - auth:/auth:ro
+      - vmail:/var/vmail
+      - vmail_index:/var/vmail_index
+    tmpfs:
+      - /var/volatile:uid=5000,gid=5000,mode=0700
+
+  postfix:
+    image: postbox-ci-postfix
+    build: ./postfix
+    depends_on:
+      init:
+        condition: service_completed_successfully
+      dovecot:
+        condition: service_started
+    volumes:
+      - ./postfix/main.cf:/etc/postfix/main.cf:ro
+      - ./postfix/master.cf:/etc/postfix/master.cf:ro
+      - ./postfix/maps:/etc/postfix/maps:ro
+      - keys:/keys:ro
+      - postfix_queue:/var/spool/postfix
+
+  postbox:
+    image: postbox:ci
+    build: ../..
+    depends_on:
+      - dovecot
+      - postfix
+    environment:
+      POSTBOX_IMAP_ADDR: dovecot:993
+      POSTBOX_SMTP_ADDR: postfix:465
+      POSTBOX_PUBLIC_URL: http://postbox.localhost
+      POSTBOX_LISTEN: :80
+      POSTBOX_CA_FILE: /ca/ca.crt
+    volumes:
+      # Only the certificate: Postbox never sees the mail server's private keys.
+      - ca:/ca:ro
+      - state:/data/postbox
+    networks:
+      default:
+        aliases:
+          - postbox.localhost
+
+  # Postbox with nothing but the three required settings, for the start-up check in test.sh.
+  postbox-minimal:
+    image: postbox:ci
+    pull_policy: never # built by the postbox service above
+    profiles: [tools]
+    environment:
+      POSTBOX_IMAP_ADDR: dovecot:993
+      POSTBOX_SMTP_ADDR: postfix:465
+      POSTBOX_PUBLIC_URL: https://mail.example.test
+
+  # Playwright with Chromium. Run with `docker compose run --rm e2e`.
+  e2e:
+    image: postbox-ci-e2e
+    build: ../../e2e
+    profiles: [tools]
+    depends_on:
+      - postbox
+    environment:
+      POSTBOX_URL: http://postbox.localhost
+
+volumes:
+  keys:
+  ca:
+  auth:
+  vmail:
+  vmail_index:
+  postfix_queue:
+  state:

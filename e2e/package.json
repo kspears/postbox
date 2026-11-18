@@ -1,0 +1,15 @@
+{
+  "name": "postbox-e2e",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.28.0",
+  "scripts": {
+    "check": "tsc -p .",
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.65.1",
+    "@types/node": "26.6.6",
+    "typescript": "6.0.3"
+  }
+}

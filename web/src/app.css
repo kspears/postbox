@@ -1,0 +1,13 @@
+:root {
+  color-scheme: light dark;
+  --bg: light-dark(#fbfbfa, #151617);
+  --text: light-dark(#1b1c1e, #ececec);
+  --text-muted: light-dark(#6b6f76, #9a9da3);
+  font-family: system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+body {
+  margin: 0;
+}

@@ -1,0 +1,11 @@
+.git
+.github
+bin
+deploy
+docs
+e2e
+**/node_modules
+web/dist
+.env
+*.pem
+*.key

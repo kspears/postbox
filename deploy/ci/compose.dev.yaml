@@ -1,0 +1,7 @@
+# Layered over compose.yaml by deploy/ci/dev.sh: Postbox published on localhost.
+services:
+  postbox:
+    environment:
+      POSTBOX_PUBLIC_URL: http://localhost:${POSTBOX_DEV_PORT}
+    ports:
+      - 127.0.0.1:${POSTBOX_DEV_PORT}:80

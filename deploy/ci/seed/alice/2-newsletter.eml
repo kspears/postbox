@@ -1,0 +1,27 @@
+From: Garden Weekly <news@example.org>
+To: alice@example.test
+Subject: =?utf-8?Q?This_week:_caf=C3=A9_planters_and_winter_pruning?=
+Date: Mon, 16 Nov 2026 12:30:00 +0000
+Message-ID: <newsletter-42@example.org>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="seed-alt"
+
+--seed-alt
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+Garden Weekly
+
+Caf=C3=A9 planters are back, and it is time to prune the apple trees.
+
+--seed-alt
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+<html><body style=3D"font-family: sans-serif">
+<h1>Garden Weekly</h1>
+<p>Caf=C3=A9 planters are back, and it is time to <b>prune the apple trees</b>.</p>
+<p><a href=3D"https://example.org/garden">Read more</a></p>
+</body></html>
+
+--seed-alt--
