@@ -6,3 +6,6 @@ docs
 e2e
 **/node_modules
 web/dist
+.env
+*.pem
+*.key

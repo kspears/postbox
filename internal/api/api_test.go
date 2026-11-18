@@ -56,6 +56,12 @@ func TestUnknownAPIPathIsNotTheFrontend(t *testing.T) {
 	}
 }
 
+func TestMissingAssetIsNotTheFrontend(t *testing.T) {
+	if w := get(t, NewHandler(dist), "GET", "/assets/old-release.js"); w.Code != 404 {
+		t.Errorf("got %d, want 404", w.Code)
+	}
+}
+
 func TestFrontendRejectsWrites(t *testing.T) {
 	if w := get(t, NewHandler(dist), "POST", "/"); w.Code != 405 {
 		t.Errorf("got %d, want 405", w.Code)

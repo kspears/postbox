@@ -13,7 +13,7 @@ services:
     pull_policy: never # built by the postfix service below
     entrypoint: ["sh", "/init.sh"]
     environment:
-      SEED_PASSWORD: ${SEED_PASSWORD:?set by deploy/ci/test.sh and deploy/ci/dev.sh}
+      SEED_PASSWORD: ${SEED_PASSWORD:-}
     volumes:
       - ./init.sh:/init.sh:ro
       - keys:/keys
@@ -72,6 +72,16 @@ services:
       default:
         aliases:
           - postbox.localhost
+
+  # Postbox with nothing but the three required settings, for the start-up check in test.sh.
+  postbox-minimal:
+    image: postbox:ci
+    pull_policy: never # built by the postbox service above
+    profiles: [tools]
+    environment:
+      POSTBOX_IMAP_ADDR: dovecot:993
+      POSTBOX_SMTP_ADDR: postfix:465
+      POSTBOX_PUBLIC_URL: https://mail.example.test
 
   # Playwright with Chromium. Run with `docker compose run --rm e2e`.
   e2e:

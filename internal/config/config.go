@@ -29,10 +29,10 @@ func FromEnv(getenv func(string) string) (Config, error) {
 		CAFile:         getenv("POSTBOX_CA_FILE"),
 	}
 	var err error
-	if c.IMAPAddr, err = hostPort("POSTBOX_IMAP_ADDR", getenv); err != nil {
+	if c.IMAPAddr, err = hostPort("POSTBOX_IMAP_ADDR", getenv("POSTBOX_IMAP_ADDR")); err != nil {
 		return Config{}, err
 	}
-	if c.SMTPAddr, err = hostPort("POSTBOX_SMTP_ADDR", getenv); err != nil {
+	if c.SMTPAddr, err = hostPort("POSTBOX_SMTP_ADDR", getenv("POSTBOX_SMTP_ADDR")); err != nil {
 		return Config{}, err
 	}
 	if c.PublicURL, err = publicURL(getenv("POSTBOX_PUBLIC_URL")); err != nil {
@@ -42,7 +42,7 @@ func FromEnv(getenv func(string) string) (Config, error) {
 		c.State = v
 	}
 	if v := getenv("POSTBOX_LISTEN"); v != "" {
-		if _, _, err := net.SplitHostPort(v); err != nil {
+		if _, port, err := net.SplitHostPort(v); err != nil || port == "" {
 			return Config{}, fmt.Errorf("POSTBOX_LISTEN must be [host]:port, got %q", v)
 		}
 		c.Listen = v
@@ -50,8 +50,9 @@ func FromEnv(getenv func(string) string) (Config, error) {
 	return c, nil
 }
 
-func hostPort(name string, getenv func(string) string) (string, error) {
-	v := getenv(name)
+var defaultPort = map[string]string{"http": "80", "https": "443"}
+
+func hostPort(name, v string) (string, error) {
 	if v == "" {
 		return "", fmt.Errorf("%s is required (host:port)", name)
 	}
@@ -64,6 +65,8 @@ func hostPort(name string, getenv func(string) string) (string, error) {
 
 // publicURL accepts an https:// origin. Plain http:// is accepted only for localhost and names
 // under .localhost, which browsers treat as secure, so local runs and CI need no certificate.
+// The result is spelled the way a browser spells an origin (lower-case host, no default port),
+// because cookies and passkeys are checked against it.
 func publicURL(v string) (*url.URL, error) {
 	if v == "" {
 		return nil, fmt.Errorf("POSTBOX_PUBLIC_URL is required (https:// URL)")
@@ -81,6 +84,11 @@ func publicURL(v string) (*url.URL, error) {
 	if u.Scheme != "https" && !(u.Scheme == "http" && local) {
 		return nil, malformed
 	}
-	u.Path = ""
-	return u, nil
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]" // an IPv6 literal; Hostname() dropped the brackets
+	}
+	if port := u.Port(); port != "" && port != defaultPort[u.Scheme] {
+		host += ":" + port
+	}
+	return &url.URL{Scheme: u.Scheme, Host: host}, nil
 }

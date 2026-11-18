@@ -1,5 +1,6 @@
 // Package web holds the built frontend. `just build` fills dist; a checkout that has not built
-// it yet still compiles, because dist/.gitkeep is tracked.
+// it yet still compiles, because dist/.gitkeep is tracked. Every build empties dist, and
+// public/.gitkeep is what puts the tracked file back.
 package web
 
 import (

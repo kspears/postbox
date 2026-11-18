@@ -2,6 +2,7 @@
 # Runs once before dovecot and postfix start. Everything it writes goes into named volumes, so
 # `docker compose down -v` removes all of it and nothing lands in the checkout.
 set -eu
+: "${SEED_PASSWORD:?the password of the seeded accounts; deploy/ci/test.sh and dev.sh set it}"
 
 # Docker creates named volumes root-owned; mail belongs to uid 5000 (mail_uid in dovecot.conf).
 chown 5000:5000 /var/vmail /var/vmail_index
@@ -22,10 +23,9 @@ if [ ! -f /keys/tls/tls.crt ]; then
 fi
 cp /keys/tls/tls.crt /ca/ca.crt
 
-# The accounts. {PLAIN} keeps the file writable by a test that changes a password: no hashing
-# tool is needed, and dovecot does not cache lookups.
-if [ ! -f /auth/users ]; then
-	for user in alice bob; do
-		printf '%s@example.test:{PLAIN}%s::::::\n' "$user" "$SEED_PASSWORD"
-	done >/auth/users
-fi
+# The accounts, rewritten at every start so they always match the caller's SEED_PASSWORD.
+# {PLAIN} keeps the file writable by a test that changes a password: no hashing tool is needed,
+# and dovecot does not cache lookups.
+for user in alice bob; do
+	printf '%s@example.test:{PLAIN}%s::::::\n' "$user" "$SEED_PASSWORD"
+done >/auth/users

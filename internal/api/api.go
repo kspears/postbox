@@ -24,6 +24,7 @@ func NewHandler(dist fs.FS) http.Handler {
 // app's own routes survive a reload.
 func frontend(dist fs.FS) http.Handler {
 	files := http.FileServerFS(dist)
+	index, indexErr := fs.ReadFile(dist, "index.html")
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			w.Header().Set("Allow", "GET, HEAD")
@@ -39,8 +40,13 @@ func frontend(dist fs.FS) http.Handler {
 			files.ServeHTTP(w, r)
 			return
 		}
-		index, err := fs.ReadFile(dist, "index.html")
-		if err != nil {
+		if strings.HasPrefix(name, "assets/") {
+			// A tab still running the previous release asks for files that are gone. It
+			// must get a 404, not the app's HTML with a script's URL.
+			http.NotFound(w, r)
+			return
+		}
+		if indexErr != nil {
 			http.Error(w, "The frontend is not built. Run: just build", http.StatusServiceUnavailable)
 			return
 		}

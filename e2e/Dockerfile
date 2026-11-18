@@ -6,7 +6,8 @@ WORKDIR /e2e
 # Keep in step with "packageManager" in package.json.
 RUN npm install --global pnpm@10.28.0
 COPY package.json pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile
+RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile
 COPY . .
 ENV CI=1
 ENTRYPOINT ["pnpm", "exec", "playwright", "test"]

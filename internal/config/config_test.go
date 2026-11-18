@@ -62,6 +62,7 @@ func TestFromEnvErrors(t *testing.T) {
 		{"imap no host", "POSTBOX_IMAP_ADDR", ":993", `POSTBOX_IMAP_ADDR must be host:port, got ":993"`},
 		{"smtp no port", "POSTBOX_SMTP_ADDR", "mail.example.test:", `POSTBOX_SMTP_ADDR must be host:port, got "mail.example.test:"`},
 		{"listen", "POSTBOX_LISTEN", "8080", `POSTBOX_LISTEN must be [host]:port, got "8080"`},
+		{"listen no port", "POSTBOX_LISTEN", ":", `POSTBOX_LISTEN must be [host]:port, got ":"`},
 		{"url http", "POSTBOX_PUBLIC_URL", "http://mail.example.test", "POSTBOX_PUBLIC_URL must be an https:// URL"},
 		{"url lookalike", "POSTBOX_PUBLIC_URL", "http://notlocalhost", "POSTBOX_PUBLIC_URL must be an https:// URL"},
 		{"url path", "POSTBOX_PUBLIC_URL", "https://mail.example.test/mail", "POSTBOX_PUBLIC_URL must be an https:// URL"},
@@ -79,8 +80,21 @@ func TestFromEnvErrors(t *testing.T) {
 	}
 }
 
-func TestPublicURLLocalhost(t *testing.T) {
-	for _, v := range []string{"http://localhost", "http://localhost:8080", "http://postbox.localhost", "https://mail.example.test/"} {
+func TestPublicURLIsABrowserOrigin(t *testing.T) {
+	tests := map[string]string{
+		"http://localhost":               "http://localhost",
+		"http://localhost:8080":          "http://localhost:8080",
+		"http://LOCALHOST:8026":          "http://localhost:8026",
+		"http://postbox.localhost:80":    "http://postbox.localhost",
+		"https://mail.example.test/":     "https://mail.example.test",
+		"https://Mail.Example.Test":      "https://mail.example.test",
+		"https://mail.example.test:443":  "https://mail.example.test",
+		"https://mail.example.test:8443": "https://mail.example.test:8443",
+		"https://mail.example.test?":     "https://mail.example.test",
+		"https://[::1]:8443":             "https://[::1]:8443",
+		"https://[::1]":                  "https://[::1]",
+	}
+	for v, want := range tests {
 		m := required()
 		m["POSTBOX_PUBLIC_URL"] = v
 		c, err := FromEnv(env(m))
@@ -88,8 +102,8 @@ func TestPublicURLLocalhost(t *testing.T) {
 			t.Errorf("%s: %v", v, err)
 			continue
 		}
-		if got := c.PublicURL.String(); got != strings.TrimSuffix(v, "/") {
-			t.Errorf("%s: got %q", v, got)
+		if got := c.PublicURL.String(); got != want {
+			t.Errorf("%s: got %q, want %q", v, got, want)
 		}
 	}
 }

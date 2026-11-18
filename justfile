@@ -1,8 +1,7 @@
 set positional-arguments
 
-# Go packages, named one by one: `./...` would also walk web/node_modules, where some npm
-# packages ship Go files.
-go_packages := "./cmd/... ./internal/... ./web"
+# gofmt does not read go.mod's ignore list, so it is pointed at the Go sources by hand.
+go_sources := "cmd internal web/embed.go"
 
 [private]
 default:
@@ -27,19 +26,19 @@ check: lint test build stack-test
 
 # Run the Go unit tests
 test *args:
-    go test {{ go_packages }} "$@"
+    go test ./... "$@"
 
 # Fail on unformatted Go, then vet, type-check and lint
 lint:
-    @test -z "$(gofmt -l cmd internal web/*.go)" || { gofmt -l cmd internal web/*.go; echo "run: just fmt"; exit 1; }
-    go vet {{ go_packages }}
+    @test -z "$(gofmt -l {{ go_sources }})" || { gofmt -l {{ go_sources }}; echo "run: just fmt"; exit 1; }
+    go vet ./...
     pnpm --dir web run check
     pnpm --dir web run lint
     pnpm --dir e2e run check
 
 # Format all Go code
 fmt:
-    gofmt -w cmd internal web/*.go
+    gofmt -w {{ go_sources }}
 
 # Build the frontend, then postbox into bin/
 build:
