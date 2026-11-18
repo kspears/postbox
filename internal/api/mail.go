@@ -24,6 +24,8 @@ func (a *apiHandler) withMail(w http.ResponseWriter, r *http.Request, s *session
 	switch {
 	case err == nil:
 		return true
+	case r.Context().Err() != nil:
+		// The browser went away; nobody is listening for an answer.
 	case errors.Is(err, mail.ErrRefused):
 		if clear, endErr := a.Sessions.End(r.Context(), s); endErr == nil {
 			http.SetCookie(w, clear)
@@ -32,8 +34,6 @@ func (a *apiHandler) withMail(w http.ResponseWriter, r *http.Request, s *session
 	case errors.Is(err, mail.ErrUnreachable):
 		log.Printf("%s %s: %v", r.Method, r.URL.Path, err)
 		writeError(w, http.StatusServiceUnavailable, errUnreachable)
-	case r.Context().Err() != nil:
-		// The browser went away; nobody is listening for an answer.
 	default:
 		internalError(w, r, err)
 	}

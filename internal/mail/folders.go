@@ -55,6 +55,13 @@ type Folder struct {
 // Folders lists every folder with its role and counts, special folders first in a fixed order,
 // then the rest by name with each folder after its parent.
 func (c *Conn) Folders() ([]Folder, error) {
+	// For the folder this connection has open, Dovecot answers STATUS from the connection's
+	// own view, which lags behind new mail until the connection next syncs. NOOP syncs it.
+	if c.Mailbox() != nil {
+		if err := c.Noop().Wait(); err != nil {
+			return nil, err
+		}
+	}
 	data, err := c.List("", "*", &imap.ListOptions{
 		ReturnSpecialUse: true,
 		ReturnStatus:     &imap.StatusOptions{NumMessages: true, NumUnseen: true},

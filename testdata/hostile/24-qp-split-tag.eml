@@ -1,0 +1,22 @@
+From: Hostile Sender <hostile@example.org>
+To: hostile@example.test
+Subject: Hostile 24: quoted-printable splitting <scr=ipt> across soft line break
+Date: Mon, 2 Nov 2026 10:24:00 +0000
+Message-ID: <hostile-24@example.org>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+<!DOCTYPE html>
+<html><body>
+<p>Visible text 24</p>
+<scr=
+ipt>top.document.title=3D'PWNED'</scr=
+ipt>
+<img src=3D"http://sink/24-qp-split-tag/qp-img" on=
+error=3D"top.document.title=3D'PWNED'">
+<a href=3D"jav=
+ascript:top.document.title=3D'PWNED'">qp link</a>
+<img src=3D"http://sink/24-qp-split-tag/qp-=
+split-url">
+</body></html>

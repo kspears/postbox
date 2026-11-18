@@ -1,0 +1,20 @@
+From: Bob <bob@example.test>
+To: reader@example.test
+Subject: Quarterly report
+Date: Thu, 12 Nov 2026 10:00:00 +0000
+Message-ID: <report-1@example.test>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="mix"
+
+--mix
+Content-Type: text/plain; charset=utf-8
+
+The figures are attached.
+
+--mix
+Content-Type: text/csv; name="figures.csv"
+Content-Disposition: attachment; filename="figures.csv"
+
+quarter,total
+Q3,42
+--mix--

@@ -1,0 +1,31 @@
+From: Hostile Sender <hostile@example.org>
+To: hostile@example.test
+Subject: Hostile 15: url() in style attributes for many properties
+Date: Mon, 2 Nov 2026 10:15:00 +0000
+Message-ID: <hostile-15@example.org>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: 7bit
+
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head><body>
+<p>Visible text 15</p>
+<div style="background:url(http://sink/15-css-style-attr/bg)">a</div>
+<div style="background-image:url('http://sink/15-css-style-attr/bg-image')">b</div>
+<ul style="list-style-image:url(http://sink/15-css-style-attr/list-style-image)"><li>c</li></ul>
+<div style="border-image:url(http://sink/15-css-style-attr/border-image) 30 round;border:10px solid">d</div>
+<div style="cursor:url(http://sink/15-css-style-attr/cursor),auto">e</div>
+<div style="content:url(http://sink/15-css-style-attr/content)">f</div>
+<div style="-webkit-mask-image:url(http://sink/15-css-style-attr/mask-image);mask:url(http://sink/15-css-style-attr/mask)">g</div>
+<div style="background-image:image-set(url(http://sink/15-css-style-attr/image-set) 1x)">h</div>
+<div style="background-image:-webkit-image-set(url(http://sink/15-css-style-attr/webkit-image-set) 1x)">i</div>
+<div style="background-image:image-set('http://sink/15-css-style-attr/image-set-string' 1x)">j</div>
+<div style="background:src('http://sink/15-css-style-attr/src-fn')">k</div>
+<div style="width:expression(top.document.title='PWNED')">l</div>
+<div style="behavior:url(http://sink/15-css-style-attr/behavior.htc)">m</div>
+<div style="-moz-binding:url(http://sink/15-css-style-attr/moz-binding#x)">n</div>
+<div style="background:url(javascript:top.document.title='PWNED')">o</div>
+<div style="background:URL( &quot;http://sink/15-css-style-attr/upper-url&quot; )">p</div>
+<div style="shape-outside:url(http://sink/15-css-style-attr/shape-outside)">q</div>
+<div style="filter:url(http://sink/15-css-style-attr/filter#f)">r</div>
+</body></html>

@@ -1,0 +1,20 @@
+From: Hostile Sender <hostile@example.org>
+To: hostile@example.test
+Subject: Hostile 03: onerror/onload on img, body, svg, iframe
+Date: Mon, 2 Nov 2026 10:03:00 +0000
+Message-ID: <hostile-03@example.org>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: 7bit
+
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head><body>
+<p>Visible text 03</p>
+<img src="http://sink/03-event-img-body-svg/img-onerror-src" onerror="top.document.title='PWNED'">
+<img src=x onerror="fetch('http://sink/03-event-img-body-svg/onerror');alert(1)">
+<svg onload="top.document.title='PWNED'"></svg>
+<svg><script>top.document.title='PWNED'</script></svg>
+<iframe onload="top.document.title='PWNED'" srcdoc="<p>x</p>"></iframe>
+<body onload="top.document.title='PWNED'">
+<body onpageshow="top.document.title='PWNED'">
+</body></html>

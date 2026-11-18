@@ -16,6 +16,7 @@ cleanup() {
 		echo "--- container logs ---" >&2
 		docker compose --profile tools logs --no-color --tail 200 >&2 || true
 	fi
+	docker rm --force postbox-ci-outage >/dev/null 2>&1 || true
 	docker compose --profile tools down --volumes --remove-orphans >/dev/null 2>&1 || true
 	exit "$status"
 }
@@ -70,6 +71,36 @@ step "criterion 2: the blocked sign-in never reached dovecot"
 logins=$(docker compose logs --no-color dovecot | grep -c 'rip=203\.0\.113\.20,' || true)
 [ "$logins" = 5 ] || fail "dovecot saw $logins logins from 203.0.113.20, want 5"
 echo "dovecot saw 5 logins from 203.0.113.20"
+
+step "criteria 12 and 13: nothing reached the sink but the images the reader allowed"
+# The only request the sink may have seen is the remote photo of "Pictures 1" and "Pictures 2",
+# loaded after "Always load from this sender". Anything else got past the sanitiser and the
+# frame's policy.
+unexpected=$(docker compose logs --no-color sink | grep -E '"(GET|POST|HEAD) ' | grep -vE '"GET /remote-[12]\.png ' || true)
+[ -z "$unexpected" ] || fail "the sink was asked for something it should not have been: $unexpected"
+echo "sink: no unexpected requests"
+
+step "criterion 28: the banner shows while dovecot is down and clears when it is back"
+docker compose run --detach --name postbox-ci-outage -T e2e --project outage >/dev/null
+state() { docker exec postbox-ci-outage test -f "/e2e/.state/$1"; }
+wait_state() {
+	for _ in $(seq 240); do
+		state "$1" && return 0
+		docker inspect -f '{{.State.Running}}' postbox-ci-outage | grep -q true || break
+		sleep 0.25
+	done
+	docker logs postbox-ci-outage >&2 || true
+	fail "the outage test did not reach $1"
+}
+wait_state outage-ready
+docker compose stop dovecot
+wait_state outage-banner
+docker compose start dovecot
+docker exec postbox-ci-outage touch /e2e/.state/outage-restarted
+status=$(docker wait postbox-ci-outage)
+docker logs postbox-ci-outage 2>&1 | tail -5
+docker rm postbox-ci-outage >/dev/null
+[ "$status" = 0 ] || fail "the outage test failed"
 
 step "criterion 28: an untrusted mail-server certificate stops sign-in"
 docker compose up --detach postbox-untrusted

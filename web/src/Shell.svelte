@@ -10,8 +10,9 @@
   } from './api';
   import { untrack } from 'svelte';
   import ConversationList from './ConversationList.svelte';
+  import ConversationView from './ConversationView.svelte';
   import FolderList from './FolderList.svelte';
-  import { openFolder, route } from './route.svelte';
+  import { closeConversation, openConversation, openFolder, route } from './route.svelte';
   import { strings } from './strings';
 
   interface Props {
@@ -27,7 +28,12 @@
   type Failure = 'unreachable' | 'internal' | null;
   let foldersFailure = $state<Failure>(null);
   let listFailure = $state<Failure>(null);
-  const failure = $derived(foldersFailure ?? listFailure);
+  // Set by the event stream while Postbox cannot reach the mail server.
+  let pushDown = $state(false);
+  const failure = $derived<Failure>(pushDown ? 'unreachable' : (foldersFailure ?? listFailure));
+  // At phone width only one pane shows; this one is for the folder list.
+  let showFolders = $state(false);
+  const view = $derived(route.conversation ? 'reading' : showFolders ? 'folders' : 'list');
   let folderMissing = $state(false);
 
   let folderList = $state<Folder[]>([]);
@@ -81,6 +87,32 @@
     next = result.value.next;
   }
 
+  // The list's first page again, merged with what is shown: rows that are on the new first
+  // page take its version, rows below it stay, and rows that were above its end but are no
+  // longer on it (moved, deleted) go.
+  async function refreshList(): Promise<void> {
+    if (loading || !listLoaded) return;
+    const mine = generation;
+    const result = await fetchConversations(route.folder);
+    if (mine !== generation || !result.ok) return;
+    const page = result.value.conversations;
+    const last = page.at(-1);
+    if (result.value.next === undefined || !last) {
+      rows = page;
+      next = undefined;
+      return;
+    }
+    const ids = new Set(page.map((c) => c.id));
+    rows = [...page, ...rows.filter((r) => !ids.has(r.id) && r.date < last.date)];
+    next ??= result.value.next;
+  }
+
+  function markedRead(id: number): void {
+    const row = rows.find((r) => r.id === id);
+    if (row) row.unread = false;
+    loadFolders(true);
+  }
+
   // A new folder: start its list from the top. Only the folder is a dependency; the list state
   // this resets must not re-run it.
   $effect(() => {
@@ -97,16 +129,42 @@
     });
   });
 
-  // Folder counts: now, every minute, and whenever the tab comes back into view.
+  // Folder counts and the open list: now, every minute, and whenever the tab comes back into
+  // view. The event stream covers the Inbox at once; this catches every other folder.
   $effect(() => {
     loadFolders(true);
-    const timer = setInterval(() => loadFolders(true), 60_000);
+    const timer = setInterval(() => {
+      loadFolders(true);
+      refreshList();
+    }, 60_000);
     const onFocus = () => loadFolders();
     addEventListener('focus', onFocus);
     return () => {
       clearInterval(timer);
       removeEventListener('focus', onFocus);
     };
+  });
+
+  // News from the mail server, as it happens.
+  $effect(() => {
+    const events = new EventSource('/api/events');
+    events.addEventListener('inbox', () => {
+      loadFolders(true);
+      if (route.folder === 'INBOX') refreshList();
+    });
+    events.addEventListener('unreachable', () => (pushDown = true));
+    events.addEventListener('reachable', () => {
+      pushDown = false;
+      loadFolders(true);
+      refreshList();
+    });
+    events.addEventListener('password_changed', () => onSignedOut('password_changed'));
+    // A stream refused outright (signed out elsewhere) is not retried by the browser; asking for
+    // the folders finds out why and acts on it.
+    events.addEventListener('error', () => {
+      if (events.readyState === EventSource.CLOSED) loadFolders(true);
+    });
+    return () => events.close();
   });
 
   // While loads fail, try again every five seconds: the folders, and the list from where it
@@ -171,11 +229,23 @@
     <p class="error-banner banner" role="alert">{strings.account.signOutFailed}</p>
   {/if}
 
-  <div class="panes">
-    <FolderList folders={folderList} current={route.folder} onOpen={openFolder} />
+  <div class="panes" data-view={view}>
+    <FolderList
+      folders={folderList}
+      current={route.folder}
+      onOpen={(name) => {
+        showFolders = false;
+        openFolder(name);
+      }}
+    />
 
     <div class="middle">
-      <h1>{currentFolder?.label ?? route.folder}</h1>
+      <div class="title">
+        <button type="button" class="folders-button" onclick={() => (showFolders = true)}>
+          ☰ <span class="visually-hidden">{strings.reading.folders}</span>
+        </button>
+        <h1>{currentFolder?.label ?? route.folder}</h1>
+      </div>
       {#if folderMissing}
         <p class="note">{strings.folders.missing}</p>
       {:else}
@@ -184,14 +254,28 @@
           conversations={rows}
           loading={loading || !listLoaded}
           hasMore={next !== undefined}
+          folder={route.folder}
+          selected={route.conversation}
           onMore={() => loadPage(false)}
+          onOpen={openConversation}
         />
       {/if}
     </div>
 
-    <section class="reading" aria-label="Reading pane">
-      <p class="note">{strings.reading.nothingSelected}</p>
-    </section>
+    {#if route.conversation}
+      <ConversationView
+        account={account.account}
+        folder={route.folder}
+        id={route.conversation}
+        onBack={closeConversation}
+        onRead={markedRead}
+        onError={(e) => (listFailure = handle(e))}
+      />
+    {:else}
+      <section class="empty" aria-label="Reading pane">
+        <p class="note">{strings.reading.nothingSelected}</p>
+      </section>
+    {/if}
   </div>
 </div>
 
@@ -271,7 +355,59 @@
   .panes {
     min-height: 0;
     display: grid;
-    grid-template-columns: 14rem minmax(20rem, 28rem) 1fr;
+    grid-template-columns: 14rem minmax(20rem, 28rem) minmax(0, 1fr);
+  }
+
+  /* Phone width: one pane at a time, chosen by what is open. */
+  @media (max-width: 767px) {
+    .panes {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .panes > :global(*) {
+      display: none !important;
+    }
+
+    .panes[data-view='folders'] > :global(nav),
+    .panes[data-view='list'] > .middle,
+    .panes[data-view='reading'] > :global(.reading) {
+      display: grid !important;
+    }
+
+    .panes[data-view='folders'] > :global(nav) {
+      display: block !important;
+    }
+
+    .folders-button {
+      display: inline-block !important;
+    }
+  }
+
+  .title {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .folders-button {
+    display: none;
+    margin-left: 0.5rem;
+    border: none;
+    background: transparent;
+    color: var(--text);
+    font-size: 1.1rem;
+    padding: 0.4rem 0.5rem;
+    cursor: pointer;
+  }
+
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
 
   .panes > :global(nav) {
@@ -291,10 +427,9 @@
     font-size: 1.25rem;
     font-weight: 650;
     letter-spacing: -0.02em;
-    border-bottom: 1px solid var(--border);
   }
 
-  .reading {
+  .empty {
     display: grid;
     place-items: center;
   }

@@ -1,0 +1,31 @@
+From: Hostile Sender <hostile@example.org>
+To: hostile@example.test
+Subject: Hostile 23: entity/whitespace/null obfuscation of attributes and tag names
+Date: Mon, 2 Nov 2026 10:23:00 +0000
+Message-ID: <hostile-23@example.org>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: 7bit
+
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head><body>
+<p>Visible text 23</p>
+<img src=x &#111;nerror="top.document.title='PWNED'">
+<img src=x o&#110;error="top.document.title='PWNED'">
+<img src=x on&#x65;rror="top.document.title='PWNED'">
+<img src="x" onerror&#61;"top.document.title='PWNED'">
+<img src="&#104;ttp://sink/entities-attr-obfusc/ent-src">
+<img src="http&colon;//sink/entities-attr-obfusc/colon">
+<img src="http://sink/entities-attr-obfusc/&#x61;mp?a=1&amp;b=2">
+<a href="&#x6A&#x61&#x76&#x61&#x73&#x63&#x72&#x69&#x70&#x74&#x3A;top.document.title='PWNED'">no semicolons</a>
+<a href="&#0000106&#0000097&#0000118&#0000097&#0000115&#0000099&#0000114&#0000105&#0000112&#0000116&#0000058top.document.title='PWNED'">padded</a>
+<a href="&Tab;javascript:top.document.title='PWNED'">Tab named</a>
+<a href="&NewLine;javascript:top.document.title='PWNED'">NewLine named</a>
+<a href="java&NewLine;script:top.document.title='PWNED'">inner NewLine</a>
+<IMG SRC=x OnErRoR="top.document.title='PWNED'">
+<img src=x onerror
+="top.document.title='PWNED'">
+<imgsrc=x onerror="top.document.title='PWNED'">
+<scr&#105;pt>top.document.title='PWNED'</scr&#105;pt>
+<a href="&#x26;#106;avascript:top.document.title='PWNED'">double encoded</a>
+</body></html>

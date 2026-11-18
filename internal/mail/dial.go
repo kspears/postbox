@@ -62,7 +62,13 @@ func NewServer(imapAddr, caFile string) (*Server, error) {
 // Login opens an IMAP connection on behalf of the person at clientIP and logs in. The error is
 // ErrRefused or wraps ErrUnreachable.
 func (s *Server) Login(ctx context.Context, clientIP netip.Addr, account, password string) (*imapclient.Client, error) {
-	c, err := s.dial(ctx, clientIP)
+	return s.login(ctx, clientIP, account, password, nil)
+}
+
+// login is Login with a handler for the server's unsolicited news (new mail, changed flags),
+// which only a connection waiting in IDLE needs.
+func (s *Server) login(ctx context.Context, clientIP netip.Addr, account, password string, news *imapclient.UnilateralDataHandler) (*imapclient.Client, error) {
+	c, err := s.dial(ctx, clientIP, news)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrUnreachable, err)
 	}
@@ -105,7 +111,7 @@ func serverSide(code imap.ResponseCode) bool {
 // to the IMAP library. The library's ID command has no room for x-originating-ip, so Postbox
 // sends that one command itself. A server that trusts Postbox's address then applies its own
 // login penalties and logs to the person's address instead of Postbox's.
-func (s *Server) dial(ctx context.Context, clientIP netip.Addr) (*imapclient.Client, error) {
+func (s *Server) dial(ctx context.Context, clientIP netip.Addr, news *imapclient.UnilateralDataHandler) (*imapclient.Client, error) {
 	dialer := &tls.Dialer{NetDialer: &net.Dialer{Timeout: 10 * time.Second}, Config: s.TLS}
 	conn, err := dialer.DialContext(ctx, "tcp", s.IMAPAddr)
 	if err != nil {
@@ -138,7 +144,8 @@ func (s *Server) dial(ctx context.Context, clientIP netip.Addr) (*imapclient.Cli
 	return imapclient.New(replay, &imapclient.Options{
 		// Without a charset reader, encoded subjects and names in anything but UTF-8 and
 		// ASCII come out undecoded.
-		WordDecoder: &mime.WordDecoder{CharsetReader: charset.Reader},
+		WordDecoder:           &mime.WordDecoder{CharsetReader: charset.Reader},
+		UnilateralDataHandler: news,
 	}), nil
 }
 

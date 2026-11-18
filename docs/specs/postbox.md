@@ -623,6 +623,8 @@ performance panel, median of five tries.
 | A stop between handing over a message and recording the answer | The message stays in Drafts with the notice "A message may have been sent. Check Sent before sending it again." | Postbox cannot know which happened; a silent resend would duplicate mail | agent default |
 | "Report spam" then "Undo" on mailstack | Trains the spam filter twice | The second training corrects the first; avoiding it would mean delaying the move | agent default |
 | How the message body is isolated | A frame on the app's own address with scripts off | The app can read the frame's height; a frame on a foreign address could not be sized to fit | agent default |
+| Remote images once allowed | `http:` and `https:` both load | Mail still links images over plain http; an https Postbox has the browser upgrade or block them as mixed content | agent default |
+| Where the blocked-image count comes from | The body document carries it in a `meta` element that the app reads from the frame | The app learns it without fetching and rendering each body twice | agent default |
 | How the client IP reaches the IMAP server | Postbox sends the `ID` command with `x-originating-ip` itself, before handing the connection to the IMAP library | The library's `ID` cannot carry that field; a PROXY-protocol listener would need extra ports on every mail server | user |
 | Threading headers on the mail server | Dovecot records them when mail is saved (`mail_always_cache_fields`), and existing mailboxes are warmed once at cutover | Measured: without it the first open of a 90,000-message folder took 6.4 minutes; with it, well under a second | agent default |
 

@@ -1,0 +1,35 @@
+From: Hostile Sender <hostile@example.org>
+To: hostile@example.test
+Subject: Hostile 29: multipart/mixed: inline SVG attachment with script, referenced via cid and as link
+Date: Mon, 2 Nov 2026 10:29:00 +0000
+Message-ID: <hostile-29@example.org>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="MIXBOUNDARY01"
+
+--MIXBOUNDARY01
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: 7bit
+
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head><body>
+<p>Visible text 29</p>
+<img src="cid:evil-svg@example.org">
+<iframe src="cid:evil-svg@example.org"></iframe>
+<object data="cid:evil-svg@example.org" type="image/svg+xml"></object>
+</body></html>
+
+--MIXBOUNDARY01
+Content-Type: image/svg+xml; name="evil.svg"
+Content-ID: <evil-svg@example.org>
+Content-Disposition: inline; filename="evil.svg"
+Content-Transfer-Encoding: 7bit
+
+<svg xmlns="http://www.w3.org/2000/svg" onload="top.document.title='PWNED'"><script>top.document.title='PWNED'</script><image href="http://sink/29-svg-attachment-cid/svg-att-image"/></svg>
+
+--MIXBOUNDARY01
+Content-Type: text/html; name="evil.html"
+Content-Disposition: attachment; filename="evil.html"
+Content-Transfer-Encoding: 7bit
+
+<script>top.document.title='PWNED'</script>
+--MIXBOUNDARY01--

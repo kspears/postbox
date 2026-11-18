@@ -1,0 +1,25 @@
+From: Hostile Sender <hostile@example.org>
+To: hostile@example.test
+Subject: Hostile 12: remote img src/srcset, picture source, lowsrc/dynsrc, input image, background attrs
+Date: Mon, 2 Nov 2026 10:12:00 +0000
+Message-ID: <hostile-12@example.org>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: 7bit
+
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head><body>
+<p>Visible text 12</p>
+<img src="http://sink/12-remote-img-attrs/img-src">
+<img srcset="http://sink/12-remote-img-attrs/img-srcset-1 1x, http://sink/12-remote-img-attrs/img-srcset-2 2x">
+<img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" srcset="http://sink/12-remote-img-attrs/img-srcset-w 640w" sizes="100vw">
+<picture><source srcset="http://sink/12-remote-img-attrs/picture-source"><source media="(min-width:1px)" srcset="http://sink/12-remote-img-attrs/picture-source-media 1x"><img alt="p"></picture>
+<img lowsrc="http://sink/12-remote-img-attrs/lowsrc" src="x:">
+<img dynsrc="http://sink/12-remote-img-attrs/dynsrc" src="x:">
+<img loading=lazy src="http://sink/12-remote-img-attrs/lazy">
+<input type="image" src="http://sink/12-remote-img-attrs/input-image">
+<table background="http://sink/12-remote-img-attrs/table-bg"><tr><td background="http://sink/12-remote-img-attrs/td-bg">cell</td><th background="http://sink/12-remote-img-attrs/th-bg">h</th></tr></table>
+<img src=" http://sink/12-remote-img-attrs/leading-space">
+<img src=http://sink/12-remote-img-attrs/unquoted>
+<img src="//sink/remote-img-attrs/protocol-relative">
+</body></html>

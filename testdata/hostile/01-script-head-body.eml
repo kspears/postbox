@@ -1,0 +1,16 @@
+From: Hostile Sender <hostile@example.org>
+To: hostile@example.test
+Subject: Hostile 01: script in head and body
+Date: Mon, 2 Nov 2026 10:01:00 +0000
+Message-ID: <hostile-01@example.org>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: 7bit
+
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><script>parent.document.title='PWNED'</script></head><body>
+<p>Visible text 01</p>
+<script>top.document.title='PWNED'</script>
+<script>alert(1)</script>
+<script>fetch('http://sink/01-script-head-body/fetch')</script>
+</body></html>

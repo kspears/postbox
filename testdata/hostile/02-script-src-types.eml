@@ -1,0 +1,21 @@
+From: Hostile Sender <hostile@example.org>
+To: hostile@example.test
+Subject: Hostile 02: script src and type variations, mixed case
+Date: Mon, 2 Nov 2026 10:02:00 +0000
+Message-ID: <hostile-02@example.org>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: 7bit
+
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head><body>
+<p>Visible text 02</p>
+<script src="http://sink/02-script-src-types/src"></script>
+<script type="text/javascript">top.document.title='PWNED'</script>
+<script type="module">top.document.title='PWNED'</script>
+<script type="module" src="http://sink/02-script-src-types/module"></script>
+<ScRiPt>top.document.title='PWNED'</ScRiPt>
+<SCRIPT SRC="http://sink/02-script-src-types/upper-src"></SCRIPT>
+<script/src="http://sink/02-script-src-types/slash-src"></script>
+<script type="application/javascript" src=//sink/02-script-src-types/proto-relative></script>
+</body></html>

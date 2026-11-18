@@ -1,0 +1,14 @@
+From: Hostile Sender <hostile@example.org>
+To: hostile@example.test
+Subject: Hostile 26: charset=utf-7 body with +ADw-script+AD4-
+Date: Mon, 2 Nov 2026 10:26:00 +0000
+Message-ID: <hostile-26@example.org>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-7
+Content-Transfer-Encoding: 7bit
+
++ADw-p+AD4-Visible text 26+ADw-/p+AD4-
++ADw-script+AD4-top.document.title='PWNED'+ADw-/script+AD4-
++ADw-img src+AD0-+ACI-http://sink/26-utf7-body/utf7-img+ACI- onerror+AD0-+ACI-top.document.title='PWNED'+ACI-+AD4-
+<p>Visible text 26 (raw, utf-7 not decoded)</p>
+<img src="http://sink/26-utf7-body/raw-in-utf7">
