@@ -76,7 +76,6 @@
 <style>
   .list {
     overflow-y: auto;
-    border-right: 1px solid var(--border);
   }
 
   ul {
@@ -157,12 +156,6 @@
     border-radius: 50%;
     background: var(--accent);
     vertical-align: middle;
-  }
-
-  .note {
-    margin: 0;
-    padding: 1.5rem 1rem;
-    color: var(--text-muted);
   }
 
   .sentinel {

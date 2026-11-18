@@ -1,6 +1,7 @@
 package mail
 
 import (
+	"cmp"
 	"slices"
 	"strings"
 	"time"
@@ -38,25 +39,18 @@ type Page struct {
 	Next          imap.UID       `json:"next,omitempty"`
 }
 
-// Select opens folder on the connection unless it is open already.
-func (c *Conn) Select(folder string) (*imapclient.SelectedMailbox, error) {
-	if m := c.Mailbox(); m != nil && m.Name == folder {
-		return m, nil
-	}
-	if _, err := c.Client.Select(folder, nil).Wait(); err != nil {
-		return nil, err
-	}
-	return c.Mailbox(), nil
-}
+// IsMissingFolder reports whether err is the server refusing to open a folder for a reason
+// of the folder's own, rather than a fault on the server's side.
+func IsMissingFolder(err error) bool { return isClientNo(err) }
 
-// Conversations returns the page of folder's conversations that follows the one whose latest
-// message is cursor, newest first; cursor 0 means the first page.
-//
-// The cursor is a message rather than a position because new mail moves conversations up
-// while someone scrolls. If the cursor's conversation has moved or gone, the page continues
-// with the first conversation whose latest message is older than the cursor.
-func (c *Conn) Conversations(folder string, cursor imap.UID) (*Page, error) {
-	box, err := c.Select(folder)
+// Conversations returns a page of folder's conversations, newest first: the first page when
+// cursor is 0, otherwise the page after the conversation whose latest message is cursor.
+// shown is how many conversations the browser already has; it places the page when the
+// cursor's conversation has moved or gone.
+func (c *Conn) Conversations(folder string, cursor imap.UID, shown int) (*Page, error) {
+	// Always SELECT, even the folder already open: a pooled connection's idea of the open
+	// folder and its message count may be stale, and after a failed SELECT none is open.
+	box, err := c.Client.Select(folder, nil).Wait()
 	if err != nil {
 		return nil, err
 	}
@@ -69,36 +63,37 @@ func (c *Conn) Conversations(folder string, cursor imap.UID) (*Page, error) {
 		return nil, err
 	}
 
-	shown, next := pageOf(threads, cursor, PageSize)
+	picked, next := pageOf(threads, cursor, shown, PageSize)
 	page.Next = next
-	if len(shown) == 0 {
+	if len(picked) == 0 {
 		return page, nil
 	}
 
-	page.Conversations, err = c.summarise(shown)
+	page.Conversations, err = c.summarise(picked)
 	return page, err
 }
 
 // pageOf picks up to size threads after the one whose latest message is cursor, and returns
 // the cursor for the page after them (0 when none follows).
-func pageOf(threads [][]imap.UID, cursor imap.UID, size int) (shown [][]imap.UID, next imap.UID) {
+//
+// The cursor is a message rather than a position because new mail moves conversations up while
+// someone scrolls. When the cursor's conversation has had a reply or gone, the page starts at
+// position shown instead: UIDs cannot place it, since a message moved into a folder gets a new
+// UID but keeps its old date. New mail above then repeats a few rows, which the browser drops.
+func pageOf(threads [][]imap.UID, cursor imap.UID, shown, size int) (picked [][]imap.UID, next imap.UID) {
 	start := 0
 	if cursor != 0 {
 		start = slices.IndexFunc(threads, func(t []imap.UID) bool { return slices.Max(t) == cursor }) + 1
 		if start == 0 {
-			// The cursor's conversation moved or went: continue below it.
-			start = slices.IndexFunc(threads, func(t []imap.UID) bool { return slices.Max(t) < cursor })
-			if start < 0 {
-				return nil, 0
-			}
+			start = min(max(shown, 0), len(threads))
 		}
 	}
 	end := min(start+size, len(threads))
-	shown = threads[start:end]
-	if end < len(threads) && len(shown) > 0 {
-		next = slices.Max(shown[len(shown)-1])
+	picked = threads[start:end]
+	if end < len(threads) && len(picked) > 0 {
+		next = slices.Max(picked[len(picked)-1])
 	}
-	return shown, next
+	return picked, next
 }
 
 // threads returns the open folder's threads as lists of UIDs, newest conversation first.
@@ -201,7 +196,7 @@ func (c *Conn) summarise(threads [][]imap.UID) ([]Conversation, error) {
 			if c := a.InternalDate.Compare(b.InternalDate); c != 0 {
 				return c
 			}
-			return int(a.UID) - int(b.UID)
+			return cmp.Compare(a.UID, b.UID)
 		})
 		conv := Conversation{ID: slices.Min(t), Count: len(found), Participants: []Person{}}
 		for _, m := range found {
@@ -243,6 +238,14 @@ func (c *Conn) summarise(threads [][]imap.UID) ([]Conversation, error) {
 	return convs, nil
 }
 
+func hasDisposition(part *imap.BodyStructureSinglePart, value string) bool {
+	d := part.Disposition()
+	return d != nil && strings.EqualFold(d.Value, value)
+}
+
+// isAttachment reports a part the sender marked as an attachment.
+func isAttachment(part *imap.BodyStructureSinglePart) bool { return hasDisposition(part, "attachment") }
+
 func hasAttachment(bs imap.BodyStructure) bool {
 	found := false
 	if bs == nil {
@@ -253,12 +256,8 @@ func hasAttachment(bs imap.BodyStructure) bool {
 		if !ok {
 			return true
 		}
-		d := single.Disposition()
-		if d != nil && strings.EqualFold(d.Value, "attachment") {
-			found = true
-		} else if single.Filename() != "" && (d == nil || !strings.EqualFold(d.Value, "inline")) && single.Type != "text" {
-			found = true
-		}
+		found = isAttachment(single) ||
+			(single.Filename() != "" && !hasDisposition(single, "inline") && single.Type != "text")
 		return !found
 	})
 	return found

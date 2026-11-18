@@ -68,8 +68,7 @@ func (s *Server) Login(ctx context.Context, clientIP netip.Addr, account, passwo
 	}
 	if err := waitCtx(ctx, c, c.Login(account, password).Wait); err != nil {
 		c.Close()
-		var imapErr *imap.Error
-		if errors.As(err, &imapErr) && imapErr.Type == imap.StatusResponseTypeNo && !serverSide(imapErr.Code) {
+		if isClientNo(err) {
 			return nil, ErrRefused
 		}
 		return nil, fmt.Errorf("%w: login: %v", ErrUnreachable, err)
@@ -83,6 +82,13 @@ func (s *Server) Logout(c *imapclient.Client) {
 	defer cancel()
 	waitCtx(ctx, c, c.Logout().Wait)
 	c.Close()
+}
+
+// isClientNo reports whether err is the server's NO for a reason of the request's own (a wrong
+// password, a missing folder) rather than trouble on the server's side.
+func isClientNo(err error) bool {
+	var status *imap.Error
+	return errors.As(err, &status) && status.Type == imap.StatusResponseTypeNo && !serverSide(status.Code)
 }
 
 // serverSide reports response codes that blame the server, not the credentials (RFC 5530).

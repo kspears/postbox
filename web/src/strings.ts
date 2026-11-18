@@ -21,6 +21,7 @@ export const strings = {
   },
 
   unreachableBanner: "Can't reach the mail server. Retrying…",
+  failedBanner: 'Something went wrong. Retrying…',
 
   account: {
     menu: 'Account',

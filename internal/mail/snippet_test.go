@@ -27,6 +27,8 @@ func TestSnippet(t *testing.T) {
 		{"base64 cut mid quantum", b64[:len(b64)-3], part("plain", "base64", "utf-8"), "Hello from base64, café included"},
 		{"latin-1", "Caf\xe9", part("plain", "8bit", "iso-8859-1"), "Café"},
 		{"html", "<html><head><style>p{}</style></head><body><p>Hello&nbsp;<b>there</b></p><script>x()</script></body></html>", part("html", "7bit", "utf-8"), "Hello there"},
+		{"html head cut off by the fetch", "<html><head><style>body{color:red} .a{margin:0}", part("html", "7bit", "utf-8"), ""},
+		{"html tag cut off by the fetch", "<body><p>Read this</p><a href=\"https://exa", part("html", "7bit", "utf-8"), "Read this"},
 		{"long text is cut", long, part("plain", "7bit", "utf-8"), strings.TrimSpace(long[:snippetRunes]) + "…"},
 		{"invalid UTF-8 removed", "ok \xff\xfe there", part("plain", "8bit", "utf-8"), "ok there"},
 	}

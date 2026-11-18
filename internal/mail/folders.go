@@ -109,20 +109,53 @@ func buildFolders(data []*imap.ListData) []Folder {
 		}
 	}
 
-	slices.SortStableFunc(folders, func(a, b Folder) int {
-		ra, rb := slices.Index(roleOrder, a.Role), slices.Index(roleOrder, b.Role)
-		switch {
-		case ra >= 0 && rb >= 0:
-			return cmp.Compare(ra, rb)
-		case ra >= 0:
-			return -1
-		case rb >= 0:
-			return 1
-		}
-		// A parent sorts before its children because its name is their prefix.
-		return cmp.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
-	})
+	sortAsTree(folders)
 	return folders
+}
+
+// sortAsTree orders folders so each comes right after its parent, and siblings put special
+// folders first (in roleOrder) and the rest by name. Comparing whole names would not do: a
+// space or "-" sorts before the delimiter, so "Foo Bar" would land between "Foo" and
+// "Foo/Child".
+func sortAsTree(folders []Folder) {
+	byName := make(map[string]Folder, len(folders))
+	for _, f := range folders {
+		byName[f.Name] = f
+	}
+	type step struct {
+		rank  int
+		label string
+	}
+	// key lists, from the top, the rank and label of each of a folder's ancestors and itself.
+	key := func(f Folder) []step {
+		var k []step
+		for depth := 0; depth <= len(folders); depth++ {
+			rank := slices.Index(roleOrder, f.Role)
+			if rank < 0 {
+				rank = len(roleOrder)
+			}
+			k = append(k, step{rank, strings.ToLower(f.Label)})
+			if f.Parent == "" {
+				break
+			}
+			parent, ok := byName[f.Parent]
+			if !ok {
+				parent = Folder{Name: f.Parent, Label: f.Parent}
+			}
+			f = parent
+		}
+		slices.Reverse(k)
+		return k
+	}
+	keys := make(map[string][]step, len(folders))
+	for _, f := range folders {
+		keys[f.Name] = key(f)
+	}
+	slices.SortStableFunc(folders, func(a, b Folder) int {
+		return slices.CompareFunc(keys[a.Name], keys[b.Name], func(x, y step) int {
+			return cmp.Or(cmp.Compare(x.rank, y.rank), cmp.Compare(x.label, y.label))
+		})
+	})
 }
 
 func deref(n *uint32) uint32 {

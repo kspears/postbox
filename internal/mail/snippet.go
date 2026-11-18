@@ -53,21 +53,22 @@ func (c *Conn) snippets(msgs []*imapclient.FetchMessageBuffer) (map[imap.UID]str
 		return out, nil
 	}
 
-	// One FETCH per distinct section, so no message is sent parts it does not have.
-	for _, s := range sections {
-		var uids imap.UIDSet
-		for uid, w := range wanted {
-			if w.section == s {
-				uids.AddNum(uid)
-			}
-		}
+	// One FETCH per distinct section, so no message is asked for a part it does not have. They
+	// run one after another: go-imap cannot say which of several pipelined FETCHes an untagged
+	// answer belongs to.
+	bySection := map[*imap.FetchItemBodySection]imap.UIDSet{}
+	for uid, w := range wanted {
+		set := bySection[w.section]
+		set.AddNum(uid)
+		bySection[w.section] = set
+	}
+	for s, uids := range bySection {
 		bufs, err := c.Fetch(uids, &imap.FetchOptions{UID: true, BodySection: []*imap.FetchItemBodySection{s}}).Collect()
 		if err != nil {
 			return nil, err
 		}
 		for _, b := range bufs {
-			w := wanted[b.UID]
-			out[b.UID] = snippet(b.FindBodySection(s), w.part)
+			out[b.UID] = snippet(b.FindBodySection(s), wanted[b.UID].part)
 		}
 	}
 	return out, nil
@@ -86,7 +87,7 @@ func textPart(bs imap.BodyStructure) (path []int, part *imap.BodyStructureSingle
 		if !ok || part != nil {
 			return part == nil
 		}
-		if d := single.Disposition(); d != nil && strings.EqualFold(d.Value, "attachment") {
+		if isAttachment(single) {
 			return true
 		}
 		switch strings.ToLower(single.MediaType()) {
@@ -110,10 +111,27 @@ func textPart(bs imap.BodyStructure) (path []int, part *imap.BodyStructureSingle
 }
 
 var (
-	htmlDrop    = regexp.MustCompile(`(?is)<(style|script|head|title)\b.*?</(style|script|head|title)\s*>`)
-	htmlTag     = regexp.MustCompile(`(?s)<[^>]*>`)
+	htmlDrop = regexp.MustCompile(`(?is)<(style|script|head|title)\b.*?</(style|script|head|title)\s*>`)
+	htmlTag  = regexp.MustCompile(`(?s)<[^>]*>`)
+	// A style, script, head or title block that the fetch cut off before it closed.
+	htmlUnclosed = regexp.MustCompile(`(?is)<(style|script|head|title)\b.*$`)
+	// A tag the fetch cut off part-way.
+	htmlCutTag  = regexp.MustCompile(`<[^>]*$`)
 	quotedLines = regexp.MustCompile(`(?m)^\s*>.*$`)
 )
+
+// htmlText reduces the start of an HTML document to its visible text. The fetch may stop
+// inside the head, a style block or a tag, so anything left open at the end is dropped too.
+func htmlText(doc string) string {
+	if i := strings.Index(strings.ToLower(doc), "<body"); i >= 0 {
+		doc = doc[i:]
+	}
+	doc = htmlDrop.ReplaceAllString(doc, " ")
+	doc = htmlUnclosed.ReplaceAllString(doc, " ")
+	doc = htmlTag.ReplaceAllString(doc, " ")
+	doc = htmlCutTag.ReplaceAllString(doc, "")
+	return html.UnescapeString(doc)
+}
 
 // snippet turns the first bytes of a body part into a line of plain text.
 func snippet(raw []byte, part *imap.BodyStructureSinglePart) string {
@@ -144,9 +162,7 @@ func snippet(raw []byte, part *imap.BodyStructureSinglePart) string {
 
 	text := string(decoded)
 	if strings.EqualFold(part.Subtype, "html") {
-		text = htmlDrop.ReplaceAllString(text, " ")
-		text = htmlTag.ReplaceAllString(text, " ")
-		text = html.UnescapeString(text)
+		text = htmlText(text)
 	}
 	text = strings.ToValidUTF8(text, "")
 	text = quotedLines.ReplaceAllString(text, "")

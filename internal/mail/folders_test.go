@@ -1,6 +1,7 @@
 package mail
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/emersion/go-imap/v2"
@@ -52,6 +53,21 @@ func TestFoldersOrderAndRoles(t *testing.T) {
 	}
 	if got[6].Selectable {
 		t.Error(`a \Noselect folder is selectable`)
+	}
+}
+
+func TestNestedFoldersFollowTheirParents(t *testing.T) {
+	got := buildFolders([]*imap.ListData{
+		list("Foo Bar"), list("Foo/Child"), list("Archive/2024", imap.MailboxAttrNoSelect),
+		list("Foo"), list("INBOX/Lists"), list("Archive", imap.MailboxAttrArchive), list("INBOX"),
+	})
+	var names []string
+	for _, f := range got {
+		names = append(names, f.Name)
+	}
+	want := []string{"INBOX", "INBOX/Lists", "Archive", "Archive/2024", "Foo", "Foo/Child", "Foo Bar"}
+	if !slices.Equal(names, want) {
+		t.Errorf("got %v, want %v", names, want)
 	}
 }
 

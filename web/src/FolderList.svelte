@@ -9,21 +9,23 @@
   }
   const { folders, current, onOpen }: Props = $props();
 
-  function depth(folder: Folder): number {
-    let d = 0;
-    let parent = folder.parent;
-    while (parent) {
-      d++;
-      parent = folders.find((f) => f.name === parent)?.parent;
-    }
-    return d;
-  }
+  // How deep each folder sits; the list already comes ordered as a tree.
+  const depths = $derived.by(() => {
+    const byName = new Map(folders.map((f) => [f.name, f]));
+    return new Map(
+      folders.map((f) => {
+        let d = 0;
+        for (let p = f.parent; p && d < folders.length; p = byName.get(p)?.parent) d++;
+        return [f.name, d];
+      }),
+    );
+  });
 </script>
 
 <nav aria-label={strings.folders.heading}>
   <ul>
     {#each folders as folder (folder.name)}
-      <li style:--depth={depth(folder)}>
+      <li style:--depth={depths.get(folder.name) ?? 0}>
         {#if folder.selectable}
           <button
             type="button"

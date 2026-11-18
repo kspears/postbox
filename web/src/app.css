@@ -26,6 +26,13 @@ input {
   font: inherit;
 }
 
+/* A quiet line in place of content that is missing or still coming. */
+.note {
+  margin: 0;
+  padding: 1.5rem 1rem;
+  color: var(--text-muted);
+}
+
 /* A message about something that went wrong, shown in place of the content it concerns. */
 .error-banner {
   margin: 0;

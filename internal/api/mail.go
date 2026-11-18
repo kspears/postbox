@@ -51,28 +51,26 @@ func (a *apiHandler) folders(w http.ResponseWriter, r *http.Request, s *session.
 	}
 }
 
-// conversations answers GET /api/conversations?folder=<name>[&cursor=<uid>].
+// conversations answers GET /api/conversations?folder=<name>[&cursor=<uid>&shown=<n>], where
+// shown is how many conversations the browser already lists.
 func (a *apiHandler) conversations(w http.ResponseWriter, r *http.Request, s *session.Session) {
-	folder := r.URL.Query().Get("folder")
-	cursor, err := strconv.ParseUint(r.URL.Query().Get("cursor"), 10, 32)
-	if folder == "" || (err != nil && r.URL.Query().Has("cursor")) {
+	q := r.URL.Query()
+	folder := q.Get("folder")
+	cursor, cursorErr := strconv.ParseUint(q.Get("cursor"), 10, 32)
+	shown, shownErr := strconv.Atoi(q.Get("shown"))
+	if folder == "" || (cursorErr != nil && q.Has("cursor")) || (shownErr != nil && q.Has("shown")) {
 		writeError(w, http.StatusBadRequest, errBadRequest)
 		return
 	}
 	var page *mail.Page
 	missing := false
 	ok := a.withMail(w, r, s, func(c *mail.Conn) error {
-		if _, err := c.Select(folder); err != nil {
-			// The server's NO to SELECT: no such folder, or one that cannot be opened.
-			var status *imap.Error
-			missing = errors.As(err, &status) && status.Type == imap.StatusResponseTypeNo
-			if missing {
-				return nil
-			}
-			return err
-		}
 		var err error
-		page, err = c.Conversations(folder, imap.UID(cursor))
+		page, err = c.Conversations(folder, imap.UID(cursor), shown)
+		if mail.IsMissingFolder(err) {
+			missing = true
+			return nil
+		}
 		return err
 	})
 	switch {

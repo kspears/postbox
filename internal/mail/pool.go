@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"fmt"
 	"net/netip"
 	"sync"
 	"time"
@@ -19,6 +20,10 @@ const commandConns = 2
 
 // A connection unused for this long is logged out.
 const idleTimeout = 5 * time.Minute
+
+// The longest one request's IMAP work may take. A server that stops answering mid-command
+// would otherwise hold the account's connections, and every later request, indefinitely.
+var commandTimeout = 30 * time.Second
 
 // A connection is not reused once it is this old. Dovecot keeps a logged-in connection working
 // after the password changes, so without a fresh login now and then a session would never learn
@@ -54,7 +59,7 @@ func NewPool(ctx context.Context, server *Server, now func() time.Time) *Pool {
 	return p
 }
 
-// Conn is a connection lent out by the pool. Call Release when done.
+// Conn is a connection lent out by Do.
 type Conn struct {
 	*imapclient.Client
 	pool     *Pool
@@ -64,18 +69,10 @@ type Conn struct {
 	broken   bool
 }
 
-// Broken marks the connection as unusable, so Release closes it instead of keeping it.
-func (c *Conn) Broken() { c.broken = true }
-
-// Release returns the connection to the pool.
-func (c *Conn) Release() {
-	c.pool.put(c)
-}
-
-// Get lends out a logged-in connection for account. It waits while the account's connections
+// get lends out a logged-in connection for account. It waits while the account's connections
 // are all in use. The error is ErrRefused when the server no longer accepts password, or wraps
 // ErrUnreachable.
-func (p *Pool) Get(ctx context.Context, clientIP netip.Addr, account, password string) (*Conn, error) {
+func (p *Pool) get(ctx context.Context, clientIP netip.Addr, account, password string) (*Conn, error) {
 	sum := sha256.Sum256([]byte(password))
 	a := p.account(account)
 	select {
@@ -206,21 +203,41 @@ type Account struct {
 }
 
 // Do runs fn on a pooled connection for acct. A connection whose command failed for any reason
-// other than the server's own NO or BAD answer is closed rather than reused. Login errors are
-// returned as Get returns them.
+// other than the server's own NO or BAD answer is closed rather than reused. A refused login
+// returns ErrRefused.
+//
+// The whole call, waiting for a connection included, is limited to commandTimeout. When the
+// limit passes or ctx ends, the connection is closed under the command, which then fails.
 func (p *Pool) Do(ctx context.Context, acct Account, fn func(*Conn) error) error {
-	c, err := p.Get(ctx, acct.ClientIP, acct.Name, acct.Password)
+	limited, cancel := context.WithTimeoutCause(ctx, commandTimeout, ErrUnreachable)
+	defer cancel()
+	c, err := p.get(limited, acct.ClientIP, acct.Name, acct.Password)
 	if err != nil {
+		if ctx.Err() == nil && limited.Err() != nil {
+			return fmt.Errorf("%w: no connection free within %s", ErrUnreachable, commandTimeout)
+		}
 		return err
 	}
-	defer c.Release()
+	defer p.put(c)
+	stop := context.AfterFunc(limited, func() { c.Client.Close() })
 	err = fn(c)
+	stop()
+
 	var status *imap.Error
-	if err != nil && !errors.As(err, &status) {
-		c.Broken()
-	}
-	if err != nil && !errors.As(err, &status) && ctx.Err() == nil {
+	switch {
+	case err == nil:
+		return nil
+	case ctx.Err() != nil:
+		c.broken = true
+		return ctx.Err()
+	case limited.Err() != nil:
+		c.broken = true
+		return fmt.Errorf("%w: no answer within %s", ErrUnreachable, commandTimeout)
+	case errors.As(err, &status):
+		// The server answered NO or BAD; the connection itself is fine.
+		return err
+	default:
+		c.broken = true
 		return errors.Join(ErrUnreachable, err)
 	}
-	return err
 }

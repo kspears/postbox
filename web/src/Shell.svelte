@@ -22,41 +22,59 @@
 
   let menuOpen = $state(false);
   let signOutFailed = $state(false);
-  let unreachable = $state(false);
+  // Why the folder list and the conversation list last failed to load, each cleared by its own
+  // next success, so one succeeding does not hide the other still failing.
+  type Failure = 'unreachable' | 'internal' | null;
+  let foldersFailure = $state<Failure>(null);
+  let listFailure = $state<Failure>(null);
+  const failure = $derived(foldersFailure ?? listFailure);
   let folderMissing = $state(false);
 
   let folderList = $state<Folder[]>([]);
   let rows = $state<Conversation[]>([]);
   let next = $state<number | undefined>(undefined);
   let loading = $state(false);
+  // False until the open folder's first page has arrived, so a failed load never reads as empty.
+  let listLoaded = $state(false);
   // Bumped whenever the open folder changes, so answers for the old one are dropped.
   let generation = 0;
 
   const currentFolder = $derived(folderList.find((f) => f.name === route.folder));
 
-  function handle(error: ErrorCode): void {
+  // Deals with a failed load and returns what to show for it, if anything.
+  function handle(error: ErrorCode): Failure {
     if (error === 'password_changed') onSignedOut('password_changed');
     else if (error === 'signed_out') onSignedOut();
-    else if (error === 'unreachable') unreachable = true;
     else if (error === 'no_folder') folderMissing = true;
+    else return error === 'unreachable' ? 'unreachable' : 'internal';
+    return null;
   }
 
-  async function loadFolders(): Promise<void> {
+  // One folder refresh at a time, and none within ten seconds of the last, however often the
+  // tab gains focus: each one takes one of the account's two mail-server connections.
+  let foldersInFlight = false;
+  let foldersAt = 0;
+
+  async function loadFolders(force = false): Promise<void> {
+    if (foldersInFlight || (!force && Date.now() - foldersAt < 10_000)) return;
+    foldersInFlight = true;
     const result = await fetchFolders();
-    if (!result.ok) return handle(result.error);
-    unreachable = false;
-    folderList = result.value;
+    foldersInFlight = false;
+    foldersAt = Date.now();
+    foldersFailure = result.ok ? null : handle(result.error);
+    if (result.ok) folderList = result.value;
   }
 
   async function loadPage(first: boolean): Promise<void> {
     if (loading || (!first && next === undefined)) return;
     const mine = generation;
     loading = true;
-    const result = await fetchConversations(route.folder, first ? undefined : next);
+    const result = await fetchConversations(route.folder, first ? undefined : next, rows.length);
     if (mine !== generation) return;
     loading = false;
-    if (!result.ok) return handle(result.error);
-    unreachable = false;
+    listFailure = result.ok ? null : handle(result.error);
+    if (!result.ok) return;
+    listLoaded = true;
     const seen = new Set(rows.map((r) => r.id));
     const page = result.value.conversations;
     rows = first ? page : [...rows, ...page.filter((c) => !seen.has(c.id))];
@@ -72,6 +90,8 @@
       rows = [];
       next = undefined;
       loading = false;
+      listLoaded = false;
+      listFailure = null;
       folderMissing = false;
       loadPage(true);
     });
@@ -79,8 +99,8 @@
 
   // Folder counts: now, every minute, and whenever the tab comes back into view.
   $effect(() => {
-    loadFolders();
-    const timer = setInterval(loadFolders, 60_000);
+    loadFolders(true);
+    const timer = setInterval(() => loadFolders(true), 60_000);
     const onFocus = () => loadFolders();
     addEventListener('focus', onFocus);
     return () => {
@@ -89,12 +109,13 @@
     };
   });
 
-  // While the mail server is unreachable, try again every five seconds.
+  // While loads fail, try again every five seconds: the folders, and the list from where it
+  // stopped.
   $effect(() => {
-    if (!unreachable) return;
+    if (!failure) return;
     const timer = setInterval(() => {
-      loadFolders();
-      if (rows.length === 0) loadPage(true);
+      if (foldersFailure) loadFolders(true);
+      if (listFailure) loadPage(!listLoaded);
     }, 5_000);
     return () => clearInterval(timer);
   });
@@ -141,8 +162,10 @@
     </div>
   </header>
 
-  {#if unreachable}
-    <p class="error-banner banner" role="alert">{strings.unreachableBanner}</p>
+  {#if failure}
+    <p class="error-banner banner" role="alert">
+      {failure === 'unreachable' ? strings.unreachableBanner : strings.failedBanner}
+    </p>
   {/if}
   {#if signOutFailed}
     <p class="error-banner banner" role="alert">{strings.account.signOutFailed}</p>
@@ -159,7 +182,7 @@
         <ConversationList
           account={account.account}
           conversations={rows}
-          {loading}
+          loading={loading || !listLoaded}
           hasMore={next !== undefined}
           onMore={() => loadPage(false)}
         />
@@ -262,10 +285,6 @@
     border-right: 1px solid var(--border);
   }
 
-  .middle :global(.list) {
-    border-right: none;
-  }
-
   h1 {
     margin: 0;
     padding: 0.85rem 1rem 0.6rem;
@@ -278,11 +297,5 @@
   .reading {
     display: grid;
     place-items: center;
-  }
-
-  .note {
-    margin: 0;
-    padding: 1.5rem 1rem;
-    color: var(--text-muted);
   }
 </style>

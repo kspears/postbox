@@ -101,8 +101,12 @@ export async function folders(): Promise<Result<Folder[]>> {
   return result.ok ? { ok: true, value: result.value.folders } : result;
 }
 
-export function conversations(folder: string, cursor?: number): Promise<Result<ConversationPage>> {
+/** The page after cursor; shown is how many conversations are already listed. */
+export function conversations(folder: string, cursor?: number, shown = 0): Promise<Result<ConversationPage>> {
   const query = new URLSearchParams({ folder });
-  if (cursor) query.set('cursor', String(cursor));
+  if (cursor) {
+    query.set('cursor', String(cursor));
+    query.set('shown', String(shown));
+  }
   return call('GET', `/api/conversations?${query}`);
 }

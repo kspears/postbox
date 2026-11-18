@@ -10,12 +10,27 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kspears/postbox/internal/clock"
 	"github.com/kspears/postbox/internal/mail/mailtest"
 )
 
-// poolServer accepts the password in *accept and counts logins and open connections.
-func poolServer(t *testing.T, accept *atomic.Value) (*Pool, *atomic.Int32, *atomic.Int32) {
+// fakePool is a Pool in front of a scripted server that accepts the password in accept and
+// counts logins and the most connections open at once. Its clock moves only when a test says.
+type fakePool struct {
+	*Pool
+	accept       *atomic.Value
+	logins, peak *atomic.Int32
+	clock        *clock.Clock
+}
+
+func testServer(addr string) *Server {
+	return &Server{IMAPAddr: addr, TLS: &tls.Config{InsecureSkipVerify: true}}
+}
+
+func poolServer(t *testing.T, password string) fakePool {
 	t.Helper()
+	accept := &atomic.Value{}
+	accept.Store(password)
 	logins, open, peak := &atomic.Int32{}, &atomic.Int32{}, &atomic.Int32{}
 	addr := mailtest.Listen(t, "* OK ready\r\n", func(tag, verb, line string) (string, bool) {
 		switch verb {
@@ -35,28 +50,8 @@ func poolServer(t *testing.T, accept *atomic.Value) (*Pool, *atomic.Int32, *atom
 		}
 		return tag + " OK\r\n", false
 	})
-	p := NewPool(t.Context(), &Server{IMAPAddr: addr, TLS: &tls.Config{InsecureSkipVerify: true}}, testClock.Now)
-	return p, logins, peak
-}
-
-// testClock is the pool's clock in these tests; only TestPoolLogsInAgainAfterMaxAge moves it.
-var testClock = &fakeClock{t: time.Unix(1_800_000_000, 0)}
-
-type fakeClock struct {
-	mu sync.Mutex
-	t  time.Time
-}
-
-func (c *fakeClock) Now() time.Time {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.t
-}
-
-func (c *fakeClock) advance(d time.Duration) {
-	c.mu.Lock()
-	c.t = c.t.Add(d)
-	c.mu.Unlock()
+	clk := &clock.Clock{}
+	return fakePool{NewPool(t.Context(), testServer(addr), clk.Now), accept, logins, peak, clk}
 }
 
 func acct(password string) Account {
@@ -64,9 +59,8 @@ func acct(password string) Account {
 }
 
 func TestPoolReusesConnections(t *testing.T) {
-	var accept atomic.Value
-	accept.Store("pw")
-	p, logins, _ := poolServer(t, &accept)
+	p := poolServer(t, "pw")
+	logins := p.logins
 	for range 3 {
 		if err := p.Do(context.Background(), acct("pw"), func(c *Conn) error { return c.Noop().Wait() }); err != nil {
 			t.Fatal(err)
@@ -78,9 +72,8 @@ func TestPoolReusesConnections(t *testing.T) {
 }
 
 func TestPoolCapsConnectionsPerAccount(t *testing.T) {
-	var accept atomic.Value
-	accept.Store("pw")
-	p, _, peak := poolServer(t, &accept)
+	p := poolServer(t, "pw")
+	peak := p.peak
 	var wg sync.WaitGroup
 	for range 8 {
 		wg.Go(func() {
@@ -97,13 +90,11 @@ func TestPoolCapsConnectionsPerAccount(t *testing.T) {
 }
 
 func TestPoolNoticesAChangedPassword(t *testing.T) {
-	var accept atomic.Value
-	accept.Store("old")
-	p, _, _ := poolServer(t, &accept)
+	p := poolServer(t, "old")
 	if err := p.Do(context.Background(), acct("old"), func(*Conn) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
-	accept.Store("new")
+	p.accept.Store("new")
 	// A session with the new password must not reuse the old login, and one with the old
 	// password must be told it no longer works.
 	if err := p.Do(context.Background(), acct("new"), func(*Conn) error { return nil }); err != nil {
@@ -115,9 +106,8 @@ func TestPoolNoticesAChangedPassword(t *testing.T) {
 }
 
 func TestPoolRetiresBrokenConnections(t *testing.T) {
-	var accept atomic.Value
-	accept.Store("pw")
-	p, logins, _ := poolServer(t, &accept)
+	p := poolServer(t, "pw")
+	logins := p.logins
 	err := p.Do(context.Background(), acct("pw"), func(*Conn) error { return errors.New("connection reset") })
 	if !errors.Is(err, ErrUnreachable) {
 		t.Errorf("got %v, want ErrUnreachable", err)
@@ -130,23 +120,72 @@ func TestPoolRetiresBrokenConnections(t *testing.T) {
 
 // A password changed elsewhere is noticed within maxAge even while the session stays busy.
 func TestPoolLogsInAgainAfterMaxAge(t *testing.T) {
-	var accept atomic.Value
-	accept.Store("old")
-	p, logins, _ := poolServer(t, &accept)
+	p := poolServer(t, "old")
+	logins := p.logins
 	use := func() error { return p.Do(context.Background(), acct("old"), func(*Conn) error { return nil }) }
 	if err := use(); err != nil {
 		t.Fatal(err)
 	}
-	accept.Store("new")
-	testClock.advance(maxAge - time.Second)
+	p.accept.Store("new")
+	p.clock.Advance(maxAge - time.Second)
 	if err := use(); err != nil {
 		t.Errorf("before maxAge the connection is reused: %v", err)
 	}
-	testClock.advance(time.Second)
+	p.clock.Advance(time.Second)
 	if err := use(); !errors.Is(err, ErrRefused) {
 		t.Errorf("after maxAge: got %v, want ErrRefused", err)
 	}
 	if n := logins.Load(); n != 2 {
 		t.Errorf("%d logins, want 2", n)
+	}
+}
+
+// A server that stops answering mid-command must not hold the account's connections for ever.
+func TestPoolGivesUpOnAHungServer(t *testing.T) {
+	old := commandTimeout
+	commandTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { commandTimeout = old })
+
+	addr := mailtest.Listen(t, "* OK ready\r\n", func(tag, verb, line string) (string, bool) {
+		if verb == "NOOP" {
+			return "", false // never answer
+		}
+		return tag + " OK\r\n", false
+	})
+	p := NewPool(t.Context(), testServer(addr), (&clock.Clock{}).Now)
+	hang := func(c *Conn) error { return c.Noop().Wait() }
+
+	var wg sync.WaitGroup
+	for range commandConns + 2 {
+		wg.Go(func() {
+			start := time.Now()
+			err := p.Do(context.Background(), acct("pw"), hang)
+			if !errors.Is(err, ErrUnreachable) {
+				t.Errorf("got %v, want ErrUnreachable", err)
+			}
+			if took := time.Since(start); took > 2*time.Second {
+				t.Errorf("took %s", took)
+			}
+		})
+	}
+	wg.Wait()
+	// The hung connections were closed, so the next call logs in afresh and works.
+	if err := p.Do(context.Background(), acct("pw"), func(*Conn) error { return nil }); err != nil {
+		t.Errorf("after the hang: %v", err)
+	}
+}
+
+func TestPoolStopsWaitingWhenTheRequestEnds(t *testing.T) {
+	p := poolServer(t, "pw")
+	block := make(chan struct{})
+	defer close(block)
+	for range commandConns {
+		go p.Do(context.Background(), acct("pw"), func(*Conn) error { <-block; return nil })
+	}
+	time.Sleep(100 * time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if err := p.Do(ctx, acct("pw"), func(*Conn) error { return nil }); !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("got %v, want the request's own deadline", err)
 	}
 }
