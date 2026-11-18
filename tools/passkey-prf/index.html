@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Passkey PRF test</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        max-width: 42rem;
+        margin: 2rem auto;
+        padding: 0 1rem;
+        line-height: 1.5;
+      }
+      button {
+        font: inherit;
+        padding: 0.5rem 1rem;
+        margin: 0.25rem 0.5rem 0.25rem 0;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        margin: 1rem 0;
+      }
+      td {
+        border-top: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+        padding: 0.4rem 0.5rem 0.4rem 0;
+        vertical-align: top;
+      }
+      td:last-child {
+        font-weight: 600;
+      }
+      .yes {
+        color: light-dark(#17722f, #5fd07e);
+      }
+      .no {
+        color: light-dark(#b3261e, #ff8a80);
+      }
+      textarea {
+        width: 100%;
+        height: 9rem;
+        font: 0.85rem ui-monospace, monospace;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Passkey PRF test</h1>
+    <p>
+      Postbox plans to lock your mail password with a key that only your passkey can produce (the
+      WebAuthn "PRF" extension). Not every browser and passkey provider supports it. This page
+      finds out whether yours does. Nothing leaves this page.
+    </p>
+    <ol>
+      <li>Press <b>Create a passkey</b> and save it where you normally keep passkeys.</li>
+      <li>Press <b>Use it</b> and approve.</li>
+      <li>Press <b>Sign in with it</b> and pick the newest passkey named "prf-test".</li>
+      <li>Copy the result box and send it back. Then delete the "prf-test" passkeys from your provider.</li>
+    </ol>
+    <p>
+      <button id="create">1. Create a passkey</button>
+      <button id="use">2. Use it</button>
+      <button id="signin">3. Sign in with it</button>
+    </p>
+    <table id="rows"></table>
+    <textarea id="summary" readonly></textarea>
+
+    <script type="module">
+      // The same fixed input every time, so the passkey must give the same key every time.
+      const salt = new TextEncoder().encode('postbox passkey prf test, salt v1');
+      const results = {};
+      let created = null; // id of the passkey made in step 1
+      let first = null; // what step 2 got from it
+      const hex = (buffer) => [...new Uint8Array(buffer)].map((b) => b.toString(16).padStart(2, '0')).join('');
+      const random = (n) => crypto.getRandomValues(new Uint8Array(n));
+
+      // A new attempt starts without the previous attempt's error line.
+      function forgetFailures() {
+        for (const key of Object.keys(results)) if (key.endsWith('failed')) delete results[key];
+      }
+
+      function record(name, value) {
+        results[name] = value;
+        const rows = document.getElementById('rows');
+        rows.replaceChildren();
+        for (const [key, val] of Object.entries(results)) {
+          const row = rows.insertRow();
+          row.insertCell().textContent = key;
+          const cell = row.insertCell();
+          cell.textContent = String(val);
+          if (val === true || val === false) cell.className = val ? 'yes' : 'no';
+        }
+        document.getElementById('summary').value = JSON.stringify(
+          { browser: navigator.userAgent, host: location.hostname, ...results },
+          null,
+          2,
+        );
+      }
+
+      async function getKey(allowCredentials) {
+        const assertion = await navigator.credentials.get({
+          publicKey: {
+            challenge: random(32),
+            rpId: location.hostname,
+            userVerification: 'required',
+            allowCredentials,
+            extensions: { prf: { eval: { first: salt } } },
+          },
+        });
+        const first = assertion.getClientExtensionResults().prf?.results?.first;
+        return { id: hex(assertion.rawId), key: first ? hex(first) : null, bytes: first?.byteLength ?? 0 };
+      }
+
+      document.getElementById('create').onclick = async () => {
+        forgetFailures();
+        try {
+          const credential = await navigator.credentials.create({
+            publicKey: {
+              challenge: random(32),
+              rp: { name: 'Postbox PRF test', id: location.hostname },
+              user: { id: random(16), name: 'prf-test', displayName: 'prf-test' },
+              pubKeyCredParams: [
+                { type: 'public-key', alg: -7 },
+                { type: 'public-key', alg: -257 },
+              ],
+              authenticatorSelection: { residentKey: 'required', userVerification: 'required' },
+              extensions: { prf: { eval: { first: salt } } },
+            },
+          });
+          const prf = credential.getClientExtensionResults().prf;
+          record('1. Passkey created', true);
+          record('   provider type', credential.authenticatorAttachment ?? 'not reported');
+          record('   says PRF is enabled at creation', prf?.enabled === true);
+          record('   gave a key at creation', Boolean(prf?.results?.first));
+
+          created = credential.rawId;
+        } catch (error) {
+          record('Create failed', `${error.name}: ${error.message}`);
+        }
+      };
+
+      // What Postbox would do at enrolment: use the new passkey once to get the key. It is a
+      // separate button because Safari allows one passkey prompt per click.
+      document.getElementById('use').onclick = async () => {
+        forgetFailures();
+        if (!created) {
+          record('Use failed', 'press "Create a passkey" first');
+          return;
+        }
+        try {
+          const used = await getKey([{ type: 'public-key', id: created }]);
+          record('2. Gave a key when used right after', used.key !== null);
+          record('   key length is 32 bytes', used.bytes === 32);
+          first = used;
+        } catch (error) {
+          record('Use failed', `${error.name}: ${error.message}`);
+        }
+      };
+
+      document.getElementById('signin').onclick = async () => {
+        forgetFailures();
+        try {
+          // No list of passkeys: the browser offers whatever it has for this site.
+          const used = await getKey(undefined);
+          record('3. Signed in without typing a name', true);
+          record('   gave a key', used.key !== null);
+          if (first) {
+            const same = used.id === first.id;
+            record('   same passkey as created', same);
+            // Comparing keys of two different passkeys would say nothing.
+            if (same) record('   same key as before', used.key !== null && used.key === first.key);
+          }
+        } catch (error) {
+          record('Sign-in failed', `${error.name}: ${error.message}`);
+        }
+      };
+
+      record('Page is a secure context', window.isSecureContext);
+      record('Browser has passkeys', typeof PublicKeyCredential !== 'undefined');
+    </script>
+  </body>
+</html>

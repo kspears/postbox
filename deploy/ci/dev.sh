@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Starts the test stack with Postbox on http://localhost:8026 and seeds two mailboxes. Safe to
-# run again: it rebuilds Postbox and keeps the mail. Stop it with `just dev-down`. Set
-# POSTBOX_DEV_PORT when 8026 is taken.
+# run again: it rebuilds Postbox and keeps the mail. Set POSTBOX_DEV_PORT when 8026 is taken.
+#
+# With arguments it runs `docker compose` on that stack instead: `dev.sh down`, `dev.sh logs`.
+# Mind `down --volumes`: it deletes the mailboxes, including anything `just bench` generated.
 set -euo pipefail
 
 cd "$(dirname "$0")"
@@ -14,8 +16,8 @@ mkdir -p .dev
 SEED_PASSWORD=$(<.dev/password)
 export SEED_PASSWORD
 
-if [ "${1:-}" = down ]; then
-	exec docker compose down
+if [ $# -gt 0 ]; then
+	exec docker compose "$@"
 fi
 
 docker compose up --detach --build

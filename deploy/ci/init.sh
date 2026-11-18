@@ -26,6 +26,7 @@ cp /keys/tls/tls.crt /ca/ca.crt
 # The accounts, rewritten at every start so they always match the caller's SEED_PASSWORD.
 # {PLAIN} keeps the file writable by a test that changes a password: no hashing tool is needed,
 # and dovecot does not cache lookups.
-for user in alice bob; do
+# bench is mailbench's account: it receives no mail, so postfix does not know it.
+for user in alice bob bench; do
 	printf '%s@example.test:{PLAIN}%s::::::\n' "$user" "$SEED_PASSWORD"
 done >/auth/users

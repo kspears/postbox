@@ -83,6 +83,26 @@ services:
       POSTBOX_SMTP_ADDR: postfix:465
       POSTBOX_PUBLIC_URL: https://mail.example.test
 
+  # The Go toolchain on the compose network, for tools that talk to the mail server directly:
+  # `docker compose run --rm go go run ./cmd/mailbench check`.
+  go:
+    image: golang:1.27.3-trixie@sha256:af1bfc2614ebb1dbd31af514b78740fd678850e76498762b425ecee4c5c6ea80
+    profiles: [tools]
+    depends_on:
+      - dovecot
+    working_dir: /src
+    environment:
+      POSTBOX_IMAP_ADDR: dovecot:993
+      POSTBOX_CA_FILE: /ca/ca.crt
+      SEED_PASSWORD: ${SEED_PASSWORD:-}
+      # The checkout is mounted read-only and has no .git inside the container.
+      GOFLAGS: -buildvcs=false
+    volumes:
+      - ../..:/src:ro
+      - ca:/ca:ro
+      - go_cache:/root/.cache/go-build
+      - go_mod:/go/pkg/mod
+
   # Playwright with Chromium. Run with `docker compose run --rm e2e`.
   e2e:
     image: postbox-ci-e2e
@@ -101,3 +121,5 @@ volumes:
   vmail_index:
   postfix_queue:
   state:
+  go_cache:
+  go_mod:
