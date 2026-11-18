@@ -1,0 +1,11 @@
+From: Postbox <hello@example.org>
+To: Bob <bob@example.test>
+Subject: Welcome to Postbox
+Date: Mon, 16 Nov 2026 09:00:00 +0000
+Message-ID: <welcome-2@example.org>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Hello Bob,
+
+This is the first message in your test mailbox.
