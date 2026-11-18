@@ -1,6 +1,14 @@
 // The browser side of Postbox's HTTP API. Failures come back as error codes, never as text.
 
-const knownErrors = ['wrong_credentials', 'throttled', 'unreachable', 'internal'] as const;
+const knownErrors = [
+  'wrong_credentials',
+  'throttled',
+  'unreachable',
+  'signed_out',
+  'password_changed',
+  'no_folder',
+  'internal',
+] as const;
 export type ErrorCode = (typeof knownErrors)[number];
 
 export interface Account {
@@ -8,51 +16,93 @@ export interface Account {
   method: 'password' | 'passkey';
 }
 
-export type Result<T> = { ok: true; value: T } | { ok: false; error: ErrorCode };
+export type Role = 'inbox' | 'drafts' | 'sent' | 'archive' | 'junk' | 'trash';
 
-async function call(method: string, path: string, body?: unknown): Promise<Response> {
-  return fetch(path, {
-    method,
-    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-    credentials: 'same-origin',
-  });
+export interface Folder {
+  name: string;
+  label: string;
+  parent?: string;
+  role?: Role;
+  unread: number;
+  total: number;
+  selectable: boolean;
 }
 
-async function errorOf(response: Response): Promise<ErrorCode> {
+export interface Person {
+  name: string;
+  email: string;
+}
+
+export interface Conversation {
+  id: number;
+  uids: number[];
+  subject: string;
+  participants: Person[];
+  snippet: string;
+  date: string;
+  count: number;
+  unread: boolean;
+  flagged: boolean;
+  attachments: boolean;
+}
+
+export interface ConversationPage {
+  conversations: Conversation[];
+  next?: number;
+}
+
+export type Result<T> = { ok: true; value: T } | { ok: false; error: ErrorCode };
+
+async function call<T>(method: string, path: string, body?: unknown): Promise<Result<T>> {
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      method,
+      headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      credentials: 'same-origin',
+    });
+  } catch {
+    // No answer at all: Postbox itself is unreachable.
+    return { ok: false, error: 'internal' };
+  }
+  if (response.ok) {
+    const value = response.status === 204 ? undefined : await response.json();
+    return { ok: true, value: value as T };
+  }
   try {
     const { error } = (await response.json()) as { error?: string };
-    return knownErrors.find((code) => code === error) ?? 'internal';
+    return { ok: false, error: knownErrors.find((code) => code === error) ?? 'internal' };
   } catch {
-    return 'internal';
+    return { ok: false, error: 'internal' };
   }
 }
 
 /** The signed-in account, or null when the browser has no session. */
 export async function currentAccount(): Promise<Account | null> {
-  const response = await call('GET', '/api/session');
-  if (response.status === 401) return null;
-  if (!response.ok) throw new Error(`GET /api/session: ${response.status}`);
-  return (await response.json()) as Account;
+  const result = await call<Account>('GET', '/api/session');
+  if (result.ok) return result.value;
+  if (result.error === 'signed_out') return null;
+  throw new Error(`GET /api/session: ${result.error}`);
 }
 
-export async function signIn(email: string, password: string, keep: boolean): Promise<Result<Account>> {
-  try {
-    const response = await call('POST', '/api/session', { email, password, keep });
-    if (response.ok) return { ok: true, value: (await response.json()) as Account };
-    return { ok: false, error: await errorOf(response) };
-  } catch {
-    // The request never got an answer: Postbox itself is unreachable.
-    return { ok: false, error: 'internal' };
-  }
+export function signIn(email: string, password: string, keep: boolean): Promise<Result<Account>> {
+  return call('POST', '/api/session', { email, password, keep });
 }
 
 /** True once the server has ended the session(s); a session that was already gone counts. */
 export async function signOut(everywhere: boolean): Promise<boolean> {
-  try {
-    const response = await call('DELETE', everywhere ? '/api/sessions' : '/api/session');
-    return response.ok || response.status === 401;
-  } catch {
-    return false;
-  }
+  const result = await call<void>('DELETE', everywhere ? '/api/sessions' : '/api/session');
+  return result.ok || result.error === 'signed_out';
+}
+
+export async function folders(): Promise<Result<Folder[]>> {
+  const result = await call<{ folders: Folder[] }>('GET', '/api/folders');
+  return result.ok ? { ok: true, value: result.value.folders } : result;
+}
+
+export function conversations(folder: string, cursor?: number): Promise<Result<ConversationPage>> {
+  const query = new URLSearchParams({ folder });
+  if (cursor) query.set('cursor', String(cursor));
+  return call('GET', `/api/conversations?${query}`);
 }

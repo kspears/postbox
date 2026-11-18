@@ -23,10 +23,16 @@ if [ ! -f /keys/tls/tls.crt ]; then
 fi
 cp /keys/tls/tls.crt /ca/ca.crt
 
-# The accounts, rewritten at every start so they always match the caller's SEED_PASSWORD.
-# {PLAIN} keeps the file writable by a test that changes a password: no hashing tool is needed,
-# and dovecot does not cache lookups.
-# bench is mailbench's account: it receives no mail, so postfix does not know it.
-for user in alice bob bench; do
-	printf '%s@example.test:{PLAIN}%s::::::\n' "$user" "$SEED_PASSWORD"
-done >/auth/users
+# The accounts. They are rewritten only when SEED_PASSWORD differs from the one they were
+# written with, so a test that changes one password keeps its change when compose runs this
+# again, and a new dev password still reaches every account. {PLAIN} keeps the file writable
+# without a hashing tool; dovecot does not cache lookups. bench (mailbench), paging (a long list)
+# and changer (a password that changes mid-test) are filled directly by the tests and receive no
+# mail, so postfix does not know them.
+if [ ! -f /auth/users ] || [ "$(cat /auth/seed 2>/dev/null)" != "$SEED_PASSWORD" ]; then
+	for user in alice bob bench paging changer; do
+		printf '%s@example.test:{PLAIN}%s::::::\n' "$user" "$SEED_PASSWORD"
+	done >/auth/users
+	printf '%s' "$SEED_PASSWORD" >/auth/seed
+	chmod 600 /auth/seed
+fi

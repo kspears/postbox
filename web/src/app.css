@@ -6,6 +6,7 @@
   --text-muted: light-dark(#62666d, #9a9da3);
   --border: light-dark(#dcdcd8, #34363a);
   --hover: light-dark(#efefec, #2a2c2f);
+  --selected: light-dark(#e3e9fb, #26304d);
   --accent: light-dark(#2f5bd3, #7b9cff);
   --on-accent: light-dark(#ffffff, #0d1430);
   --danger: light-dark(#a8261b, #ff9b8f);

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net"
 	"net/netip"
 	"os"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapclient"
+	"github.com/emersion/go-message/charset"
 )
 
 // ErrUnreachable means the mail server could not be reached or did not answer properly:
@@ -127,7 +129,11 @@ func (s *Server) dial(ctx context.Context, clientIP netip.Addr) (*imapclient.Cli
 
 	// The library reads the greeting again from the replayed bytes, then whatever follows.
 	replay := &replayConn{Conn: conn, r: io.MultiReader(strings.NewReader(greeting), r)}
-	return imapclient.New(replay, nil), nil
+	return imapclient.New(replay, &imapclient.Options{
+		// Without a charset reader, encoded subjects and names in anything but UTF-8 and
+		// ASCII come out undecoded.
+		WordDecoder: &mime.WordDecoder{CharsetReader: charset.Reader},
+	}), nil
 }
 
 // sendID sends `ID` with the client's address and waits for the server's tagged answer. A

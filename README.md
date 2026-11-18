@@ -3,7 +3,7 @@
 A web mail client in one container. Postbox talks IMAP and SMTP submission to the mail server
 you already run and keeps no copy of your mail.
 
-Status: early development. Signing in and out works; there is no mail to read yet.
+Status: early development. You can sign in and browse folders and conversation lists; opening a message comes next.
 The specification is [docs/specs/postbox.md](docs/specs/postbox.md).
 
 ## Configuration

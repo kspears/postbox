@@ -25,6 +25,8 @@ const (
 	errThrottled        = "throttled"
 	errUnreachable      = "unreachable"
 	errSignedOut        = "signed_out"
+	errPasswordChanged  = "password_changed"
+	errNoFolder         = "no_folder"
 	errBadRequest       = "bad_request"
 	errInternal         = "internal"
 )

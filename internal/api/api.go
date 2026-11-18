@@ -9,6 +9,7 @@ import (
 
 	"github.com/kspears/postbox/internal/auth"
 	"github.com/kspears/postbox/internal/clock"
+	"github.com/kspears/postbox/internal/mail"
 	"github.com/kspears/postbox/internal/session"
 )
 
@@ -16,6 +17,7 @@ import (
 type Deps struct {
 	Sessions *session.Manager
 	Auth     *auth.Authenticator
+	Mail     *mail.Pool
 	Clock    *clock.Clock
 	// Origin is the public URL; state-changing requests must come from it.
 	Origin string
@@ -35,6 +37,8 @@ func NewHandler(dist fs.FS, d Deps) http.Handler {
 	mux.HandleFunc("GET /api/session", a.withSession(a.whoAmI))
 	mux.HandleFunc("DELETE /api/session", a.withSession(a.signOut(false)))
 	mux.HandleFunc("DELETE /api/sessions", a.withSession(a.signOut(true)))
+	mux.HandleFunc("GET /api/folders", a.withSession(a.folders))
+	mux.HandleFunc("GET /api/conversations", a.withSession(a.conversations))
 	testRoutes(mux, a)
 	mux.Handle("/api/", http.NotFoundHandler())
 	mux.Handle("/", frontend(dist))

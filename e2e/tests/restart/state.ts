@@ -1,3 +1,4 @@
-// Where the signed-in browser state waits while Postbox restarts. .state is a volume, so it
-// outlives the test container.
+// Where signed-in browser state waits while deploy/ci/test.sh restarts Postbox (and changes a
+// password). .state is a volume, so it outlives the test container.
 export const restartState = '.state/restart.json';
+export const changerState = '.state/changer.json';
