@@ -29,8 +29,13 @@ func check(t target) error {
 	exists := make(chan uint32, 16)
 	c, err := t.dial(&imapclient.UnilateralDataHandler{
 		Mailbox: func(data *imapclient.UnilateralDataMailbox) {
-			if data.NumMessages != nil {
-				exists <- *data.NumMessages
+			if data.NumMessages == nil {
+				return
+			}
+			// Never block: the client cannot read the next response until this returns.
+			select {
+			case exists <- *data.NumMessages:
+			default:
 			}
 		},
 	})
@@ -45,18 +50,16 @@ func check(t target) error {
 	if err := c.Login(t.user, t.password).Wait(); err != nil {
 		return fmt.Errorf("login as %s: %w", t.user, err)
 	}
-	var missing []string
-	for _, want := range []imap.Cap{"IDLE", "MOVE", "SPECIAL-USE", "THREAD=REFS", "THREAD=REFERENCES", "SORT", "ID", "LIST-STATUS", "UIDPLUS", "ESEARCH", "CONDSTORE", "LITERAL+", "PREVIEW"} {
-		if !c.Caps().Has(want) {
-			missing = append(missing, string(want))
-		}
+	// Without the first group Postbox cannot work as designed; the second it can do without.
+	missing := notAdvertised(c, "IDLE", "MOVE", "SPECIAL-USE", "THREAD=REFERENCES", "SORT", "LIST-STATUS", "UIDPLUS")
+	absent := notAdvertised(c, "THREAD=REFS", "ID", "ESEARCH", "CONDSTORE", "LITERAL+", "PREVIEW")
+	err = nil
+	if len(missing) > 0 {
+		err = fmt.Errorf("required but not advertised: %s", strings.Join(missing, ", "))
 	}
-	report("capabilities", nil, "not advertised: "+orNone(missing))
+	report("capabilities", err, "optional ones not advertised: "+orNone(absent))
 
-	boxes, err := c.List("", "*", &imap.ListOptions{
-		ReturnSpecialUse: true,
-		ReturnStatus:     &imap.StatusOptions{NumMessages: true, NumUnseen: true},
-	}).Collect()
+	boxes, err := c.List("", "*", listWithCounts).Collect()
 	var special []string
 	withStatus := 0
 	for _, box := range boxes {
@@ -107,24 +110,15 @@ func check(t target) error {
 	if _, err := c.Select(checkFolder, nil).Wait(); err != nil {
 		return fmt.Errorf("select %s: %w", checkFolder, err)
 	}
-	all := &imap.SearchCriteria{}
-
-	threads, err := c.UIDThread(&imapclient.ThreadOptions{Algorithm: "REFS", SearchCriteria: all}).Wait()
-	if err == nil && (len(threads) != 1 || countThread(threads[0]) != 3) {
-		err = fmt.Errorf("want one thread of 3, got %+v", threads)
+	for _, options := range []*imapclient.ThreadOptions{threadRefs, threadFallback} {
+		threads, err := c.UIDThread(options).Wait()
+		if err == nil && (len(threads) != 1 || len(threadUIDs(threads[0])) != 3) {
+			err = fmt.Errorf("want one thread of 3, got %+v", threads)
+		}
+		report("UID THREAD "+string(options.Algorithm), err, "one conversation of three")
 	}
-	report("UID THREAD REFS", err, "one conversation of three")
 
-	threads, err = c.UIDThread(&imapclient.ThreadOptions{Algorithm: imap.ThreadReferences, SearchCriteria: all}).Wait()
-	if err == nil && (len(threads) != 1 || countThread(threads[0]) != 3) {
-		err = fmt.Errorf("want one thread of 3, got %+v", threads)
-	}
-	report("UID THREAD REFERENCES", err, "one conversation of three")
-
-	sorted, err := c.UIDSort(&imapclient.SortOptions{
-		SearchCriteria: all,
-		SortCriteria:   []imapclient.SortCriterion{{Key: imapclient.SortKeyArrival, Reverse: true}},
-	}).Wait()
+	sorted, err := c.UIDSort(newestFirst).Wait()
 	if err == nil && (len(sorted) != 3 || imap.UID(sorted[0]) != uids[2]) {
 		err = fmt.Errorf("want newest first, got %v", sorted)
 	}
@@ -196,37 +190,37 @@ func check(t target) error {
 	}
 	report("UID SEARCH TEXT, substring", err, "matched the middle of a word")
 
-	// IDLE: a second connection adds a message; the idling one must hear about it.
+	// IDLE: a second connection adds a message; the idling one must hear about it. The second
+	// connection is opened first: nothing else can be sent on this one while it idles.
+	other, err := t.login(nil)
+	if err != nil {
+		return err
+	}
+	defer other.Close()
 	for len(exists) > 0 {
 		<-exists
 	}
+	heard := ""
 	idle, err := c.Idle()
 	if err == nil {
-		other, loginErr := t.login(nil)
-		if loginErr != nil {
-			return loginErr
-		}
 		start := time.Now()
-		_, err = appendMessage(other, checkFolder, []byte("Subject: idle\r\n\r\nnew\r\n"), time.Now())
-		other.Close()
-		if err == nil {
+		if _, err = appendMessage(other, checkFolder, []byte("Subject: idle\r\n\r\nnew\r\n"), time.Now()); err == nil {
 			select {
 			case n := <-exists:
-				report("IDLE announces new mail", nil, fmt.Sprintf("%d messages, heard after %s", n, time.Since(start).Round(time.Millisecond)))
+				heard = fmt.Sprintf("%d messages, heard after %s", n, time.Since(start).Round(time.Millisecond))
 			case <-time.After(5 * time.Second):
 				err = errors.New("nothing heard within 5s")
 			}
 		}
+		// Always end IDLE, or the folder clean-up below would wait on it for ever.
 		if closeErr := idle.Close(); err == nil {
 			err = closeErr
 		}
-		if err == nil {
-			err = idle.Wait()
+		if waitErr := idle.Wait(); err == nil {
+			err = waitErr
 		}
 	}
-	if err != nil {
-		report("IDLE announces new mail", err, "")
-	}
+	report("IDLE announces new mail", err, heard)
 
 	if failed > 0 {
 		return fmt.Errorf("%d checks failed", failed)
@@ -245,12 +239,14 @@ func appendMessage(c *imapclient.Client, folder string, msg []byte, when time.Ti
 	return cmd.Wait()
 }
 
-func countThread(t imapclient.ThreadData) int {
-	n := len(t.Chain)
-	for _, sub := range t.SubThreads {
-		n += countThread(sub)
+func notAdvertised(c *imapclient.Client, caps ...imap.Cap) []string {
+	var names []string
+	for _, cap := range caps {
+		if !c.Caps().Has(cap) {
+			names = append(names, string(cap))
+		}
 	}
-	return n
+	return names
 }
 
 func nameOf(id *imap.IDData) string {

@@ -279,6 +279,9 @@ The browser-facing API is internal to Postbox and is not a public interface.
 ### What mailstack provides
 
 - Dovecot declares the five special-use folders above.
+- Dovecot records the threading headers (`Message-ID`, `References`, `In-Reply-To`, `Subject`,
+  and the dates) when mail is saved, and existing mailboxes are warmed once at cutover.
+  Otherwise the first time a folder is opened Dovecot reads every message in it.
 - Dovecot's full-text search (flatcurve, substring matching) is already on, with Junk, Trash,
   and two other folders excluded from automatic indexing. Postbox relies on it for body search.
 - Dovecot and Postfix trust the Postbox container's address to pass on the real client IP, so
@@ -617,6 +620,8 @@ performance panel, median of five tries.
 | A stop between handing over a message and recording the answer | The message stays in Drafts with the notice "A message may have been sent. Check Sent before sending it again." | Postbox cannot know which happened; a silent resend would duplicate mail | agent default |
 | "Report spam" then "Undo" on mailstack | Trains the spam filter twice | The second training corrects the first; avoiding it would mean delaying the move | agent default |
 | How the message body is isolated | A frame on the app's own address with scripts off | The app can read the frame's height; a frame on a foreign address could not be sized to fit | agent default |
+| How the client IP reaches the IMAP server | Postbox sends the `ID` command with `x-originating-ip` itself, before handing the connection to the IMAP library | The library's `ID` cannot carry that field; a PROXY-protocol listener would need extra ports on every mail server | user |
+| Threading headers on the mail server | Dovecot records them when mail is saved (`mail_always_cache_fields`), and existing mailboxes are warmed once at cutover | Measured: without it the first open of a 90,000-message folder took 6.4 minutes; with it, well under a second | agent default |
 
 ## Open questions
 

@@ -29,9 +29,11 @@ func run(t target, folder string) error {
 	if err != nil {
 		return fmt.Errorf("select %s (run `just bench generate` first): %w", folder, err)
 	}
-	fmt.Printf("%s: %d messages\n\n%-46s %9s %9s %9s\n", folder, selected.NumMessages, "", "first", "median", "slowest")
+	fmt.Printf("%s: %d messages\n", folder, selected.NumMessages)
+	fmt.Println("Server-side times on open connections, inside the stack's network. They are a floor for")
+	fmt.Println("what a person sees, not the spec's by-hand speed criteria.")
+	fmt.Printf("\n%-46s %9s %9s %9s\n", "", "first", "median", "slowest")
 
-	all := &imap.SearchCriteria{}
 	var failure error
 	measure := func(name string, fn func() error) {
 		if failure != nil {
@@ -62,13 +64,13 @@ func run(t target, folder string) error {
 	})
 
 	measure("folder list with unread counts", func() error {
-		_, err := c.List("", "*", &imap.ListOptions{ReturnSpecialUse: true, ReturnStatus: &imap.StatusOptions{NumMessages: true, NumUnseen: true}}).Collect()
+		_, err := c.List("", "*", listWithCounts).Collect()
 		return err
 	})
 
 	var threads []imapclient.ThreadData
 	measure("thread the whole folder (UID THREAD REFS)", func() error {
-		threads, err = c.UIDThread(&imapclient.ThreadOptions{Algorithm: "REFS", SearchCriteria: all}).Wait()
+		threads, err = c.UIDThread(threadRefs).Wait()
 		return err
 	})
 	if failure != nil {
@@ -77,6 +79,9 @@ func run(t target, folder string) error {
 	fmt.Printf("  -> %d conversations\n", len(threads))
 
 	// REFS orders conversations by their latest message, oldest first: the first page is the tail.
+	if len(threads) == 0 {
+		return fmt.Errorf("%s is empty; run `just bench generate` first", folder)
+	}
 	page := threads[max(0, len(threads)-pageSize):]
 	var pageUIDs imap.UIDSet
 	var biggest []imap.UID
@@ -93,18 +98,18 @@ func run(t target, folder string) error {
 		return err
 	})
 	measure("open the folder: thread + first page", func() error {
-		if _, err := c.UIDThread(&imapclient.ThreadOptions{Algorithm: "REFS", SearchCriteria: all}).Wait(); err != nil {
+		if _, err := c.UIDThread(threadRefs).Wait(); err != nil {
 			return err
 		}
 		_, err := c.Fetch(pageUIDs, listFetch).Collect()
 		return err
 	})
 	measure("fallback: UID THREAD REFERENCES", func() error {
-		_, err := c.UIDThread(&imapclient.ThreadOptions{Algorithm: imap.ThreadReferences, SearchCriteria: all}).Wait()
+		_, err := c.UIDThread(threadFallback).Wait()
 		return err
 	})
 	measure("fallback: UID SORT (REVERSE ARRIVAL)", func() error {
-		_, err := c.UIDSort(&imapclient.SortOptions{SearchCriteria: all, SortCriteria: []imapclient.SortCriterion{{Key: imapclient.SortKeyArrival, Reverse: true}}}).Wait()
+		_, err := c.UIDSort(newestFirst).Wait()
 		return err
 	})
 
@@ -133,6 +138,9 @@ func run(t target, folder string) error {
 		}
 		return nil
 	})
+	if failure != nil {
+		return failure
+	}
 	sent, err := t.login(nil)
 	if err != nil {
 		return err
@@ -150,16 +158,16 @@ func run(t target, folder string) error {
 		}
 		return err
 	})
-	if failure == nil {
-		fmt.Printf("  -> %d replies\n", found)
+	if failure != nil {
+		return failure
 	}
-
-	if failure == nil && word == "" {
+	fmt.Printf("  -> %d replies\n", found)
+	if word == "" {
 		return errors.New("found no word to search for in the opened conversation")
 	}
 	for _, term := range []struct{ label, text string }{
 		{"body search, whole word", word},
-		{"body search, middle of a word", word[min(1, len(word)):max(1, len(word)-1)]},
+		{"body search, middle of a word", word[1 : len(word)-1]},
 	} {
 		hits := 0
 		measure(term.label, func() error {
@@ -185,6 +193,10 @@ func run(t target, folder string) error {
 		_, err := c.Store(newest, &imap.StoreFlags{Op: op, Flags: []imap.Flag{imap.FlagSeen}}, nil).Collect()
 		return err
 	})
+	if failure == nil && seen {
+		// Leave the mailbox as it was found.
+		_, failure = c.Store(newest, &imap.StoreFlags{Op: imap.StoreFlagsDel, Flags: []imap.Flag{imap.FlagSeen}}, nil).Collect()
+	}
 	return failure
 }
 

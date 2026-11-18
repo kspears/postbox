@@ -1,12 +1,14 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"slices"
-	"sort"
 	"strings"
 	"time"
+
+	"github.com/emersion/go-imap/v2"
 )
 
 type genMessage struct {
@@ -19,15 +21,21 @@ type genMessage struct {
 
 // generate appends n messages to folder, grouped into conversations the way real mail is: most
 // alone, some in long exchanges. About one reply in six is the owner's own and goes to Sent
-// instead, which is what Postbox has to join back in. The same n always gives the same mailbox.
+// instead, which is what Postbox has to join back in. It writes through IMAP, not straight to
+// disk, so the server compresses, encrypts and indexes the mail exactly as it does real mail.
+// Running it again adds new conversations to the folder.
 func generate(t target, folder string, n int) error {
 	c, err := t.login(nil)
 	if err != nil {
 		return err
 	}
 	defer c.Close()
-	// "Already exists" is fine: generating twice grows the folder.
-	c.Create(folder, nil).Wait()
+	var imapErr *imap.Error
+	if err := c.Create(folder, nil).Wait(); err != nil && !(errors.As(err, &imapErr) && imapErr.Code == imap.ResponseCodeAlreadyExists) {
+		return fmt.Errorf("create %s: %w", folder, err)
+	}
+	// Part of every Message-ID, so a second run cannot collide with the first.
+	batch := time.Now().Unix()
 
 	rng := rand.New(rand.NewPCG(1, uint64(n)))
 	words := vocabulary(rng, 4000)
@@ -44,7 +52,7 @@ func generate(t target, folder string, n int) error {
 		when := end.Add(-time.Duration(rng.Int64N(int64(span))))
 		var refs []string
 		for i := 0; i < size && len(msgs) < n; i++ {
-			id := fmt.Sprintf("<t%d.m%d@mailbench.test>", thread, i)
+			id := fmt.Sprintf("<t%d.m%d.%d@mailbench.test>", thread, i, batch)
 			msgs = append(msgs, genMessage{
 				when: when, id: id, refs: slices.Clone(refs), thread: thread,
 				sent: i > 0 && rng.IntN(6) == 0,
@@ -58,7 +66,7 @@ func generate(t target, folder string, n int) error {
 		}
 	}
 	// Arrival order, so UIDs rise with time as they do in a real mailbox.
-	sort.SliceStable(msgs, func(i, j int) bool { return msgs[i].when.Before(msgs[j].when) })
+	slices.SortStableFunc(msgs, func(a, b genMessage) int { return a.when.Compare(b.when) })
 
 	start := time.Now()
 	sent := 0

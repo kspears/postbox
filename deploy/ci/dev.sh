@@ -3,6 +3,7 @@
 # run again: it rebuilds Postbox and keeps the mail. Set POSTBOX_DEV_PORT when 8026 is taken.
 #
 # With arguments it runs `docker compose` on that stack instead: `dev.sh down`, `dev.sh logs`.
+# Mind `down --volumes`: it deletes the mailboxes, including anything `just bench` generated.
 set -euo pipefail
 
 cd "$(dirname "$0")"

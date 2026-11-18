@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapclient"
 )
 
@@ -73,6 +74,15 @@ func targetFromEnv(user string) (target, error) {
 	}
 	return t, nil
 }
+
+// The commands Postbox will send, shared so that check and run exercise the same ones.
+var (
+	everything     = &imap.SearchCriteria{}
+	listWithCounts = &imap.ListOptions{ReturnSpecialUse: true, ReturnStatus: &imap.StatusOptions{NumMessages: true, NumUnseen: true}}
+	threadRefs     = &imapclient.ThreadOptions{Algorithm: "REFS", SearchCriteria: everything}
+	threadFallback = &imapclient.ThreadOptions{Algorithm: imap.ThreadReferences, SearchCriteria: everything}
+	newestFirst    = &imapclient.SortOptions{SearchCriteria: everything, SortCriteria: []imapclient.SortCriterion{{Key: imapclient.SortKeyArrival, Reverse: true}}}
+)
 
 // dial connects without logging in.
 func (t target) dial(handler *imapclient.UnilateralDataHandler) (*imapclient.Client, error) {
