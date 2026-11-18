@@ -1,0 +1,95 @@
+package config
+
+import (
+	"strings"
+	"testing"
+)
+
+func env(m map[string]string) func(string) string {
+	return func(k string) string { return m[k] }
+}
+
+func required() map[string]string {
+	return map[string]string{
+		"POSTBOX_IMAP_ADDR":  "mail.example.test:993",
+		"POSTBOX_SMTP_ADDR":  "mail.example.test:465",
+		"POSTBOX_PUBLIC_URL": "https://mail.example.test",
+	}
+}
+
+func TestFromEnvDefaults(t *testing.T) {
+	c, err := FromEnv(env(required()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.State != "/data/postbox" || c.Listen != ":8080" {
+		t.Errorf("defaults: state %q, listen %q", c.State, c.Listen)
+	}
+	if c.IMAPAddr != "mail.example.test:993" || c.SMTPAddr != "mail.example.test:465" {
+		t.Errorf("addresses: imap %q, smtp %q", c.IMAPAddr, c.SMTPAddr)
+	}
+	if c.PublicURL.String() != "https://mail.example.test" {
+		t.Errorf("public URL: %q", c.PublicURL)
+	}
+	if c.ClientIPHeader != "" || c.CAFile != "" {
+		t.Errorf("optional settings not empty: %q, %q", c.ClientIPHeader, c.CAFile)
+	}
+}
+
+func TestFromEnvOptional(t *testing.T) {
+	m := required()
+	m["POSTBOX_STATE"] = "/tmp/state"
+	m["POSTBOX_LISTEN"] = "127.0.0.1:9000"
+	m["POSTBOX_CLIENT_IP_HEADER"] = "X-Forwarded-For"
+	m["POSTBOX_CA_FILE"] = "/ca.crt"
+	c, err := FromEnv(env(m))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.State != "/tmp/state" || c.Listen != "127.0.0.1:9000" || c.ClientIPHeader != "X-Forwarded-For" || c.CAFile != "/ca.crt" {
+		t.Errorf("got %+v", c)
+	}
+}
+
+func TestFromEnvErrors(t *testing.T) {
+	tests := []struct {
+		name, key, value, want string
+	}{
+		{"imap unset", "POSTBOX_IMAP_ADDR", "", "POSTBOX_IMAP_ADDR is required (host:port)"},
+		{"smtp unset", "POSTBOX_SMTP_ADDR", "", "POSTBOX_SMTP_ADDR is required (host:port)"},
+		{"url unset", "POSTBOX_PUBLIC_URL", "", "POSTBOX_PUBLIC_URL is required (https:// URL)"},
+		{"imap no port", "POSTBOX_IMAP_ADDR", "mail.example.test", `POSTBOX_IMAP_ADDR must be host:port, got "mail.example.test"`},
+		{"imap no host", "POSTBOX_IMAP_ADDR", ":993", `POSTBOX_IMAP_ADDR must be host:port, got ":993"`},
+		{"smtp no port", "POSTBOX_SMTP_ADDR", "mail.example.test:", `POSTBOX_SMTP_ADDR must be host:port, got "mail.example.test:"`},
+		{"listen", "POSTBOX_LISTEN", "8080", `POSTBOX_LISTEN must be [host]:port, got "8080"`},
+		{"url http", "POSTBOX_PUBLIC_URL", "http://mail.example.test", "POSTBOX_PUBLIC_URL must be an https:// URL"},
+		{"url lookalike", "POSTBOX_PUBLIC_URL", "http://notlocalhost", "POSTBOX_PUBLIC_URL must be an https:// URL"},
+		{"url path", "POSTBOX_PUBLIC_URL", "https://mail.example.test/mail", "POSTBOX_PUBLIC_URL must be an https:// URL"},
+		{"url no scheme", "POSTBOX_PUBLIC_URL", "mail.example.test", "POSTBOX_PUBLIC_URL must be an https:// URL"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := required()
+			m[tt.key] = tt.value
+			_, err := FromEnv(env(m))
+			if err == nil || !strings.HasPrefix(err.Error(), tt.want) {
+				t.Errorf("got %v, want prefix %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestPublicURLLocalhost(t *testing.T) {
+	for _, v := range []string{"http://localhost", "http://localhost:8080", "http://postbox.localhost", "https://mail.example.test/"} {
+		m := required()
+		m["POSTBOX_PUBLIC_URL"] = v
+		c, err := FromEnv(env(m))
+		if err != nil {
+			t.Errorf("%s: %v", v, err)
+			continue
+		}
+		if got := c.PublicURL.String(); got != strings.TrimSuffix(v, "/") {
+			t.Errorf("%s: got %q", v, got)
+		}
+	}
+}
