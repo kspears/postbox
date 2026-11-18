@@ -4,3 +4,10 @@ go 1.27.3
 
 // Some npm packages ship Go files; keep ./... out of them.
 ignore ./web/node_modules
+
+require github.com/emersion/go-imap/v2 v2.0.0-beta.9
+
+require (
+	github.com/emersion/go-message v0.18.2 // indirect
+	github.com/emersion/go-sasl v0.0.0-20241020182733-b788ff22d5a6 // indirect
+)

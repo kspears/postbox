@@ -21,6 +21,14 @@ dev:
 dev-down:
     deploy/ci/dev.sh down
 
+# Measure the dev stack's mail server: `just bench check`, `generate -n 50000`, `run`
+bench *args:
+    deploy/ci/dev.sh run --rm go go run ./cmd/mailbench "$@"
+
+# Serve the passkey PRF test page on http://localhost:8027 (Ctrl-C stops it)
+passkey-test:
+    python3 -m http.server 8027 --bind 127.0.0.1 --directory tools/passkey-prf
+
 # Full CI gate: lint, unit tests, build, then the integration and browser tests
 check: lint test build stack-test
 
