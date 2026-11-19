@@ -22,11 +22,20 @@ func (s *Store) Setting(ctx context.Context, account, key string, v any) error {
 
 // SetSetting stores v as account's value for key.
 func (s *Store) SetSetting(ctx context.Context, account, key string, v any) error {
+	return setSetting(ctx, s.db, account, key, v)
+}
+
+// execer is a database or a transaction.
+type execer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+func setSetting(ctx context.Context, db execer, account, key string, v any) error {
 	raw, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx,
+	_, err = db.ExecContext(ctx,
 		`INSERT INTO account_settings (account, key, value) VALUES (?, ?, ?)
 		 ON CONFLICT (account, key) DO UPDATE SET value = excluded.value`,
 		account, key, string(raw))

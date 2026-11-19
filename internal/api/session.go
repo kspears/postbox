@@ -82,30 +82,47 @@ func (a *apiHandler) signIn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	account := auth.Account(req.Email)
-	err := a.Auth.CheckPassword(r.Context(), a.clientIP(r), account, req.Password)
+	err := a.Auth.PasswordSignIn(r.Context(), a.clientIP(r), account, req.Password)
+	if a.signInFailed(w, r, err) {
+		return
+	}
+	a.startSession(w, r, account, req.Password, session.Password, req.Keep)
+}
+
+// signInFailed answers a failed sign-in of any kind, and reports whether it did.
+func (a *apiHandler) signInFailed(w http.ResponseWriter, r *http.Request, err error) bool {
 	switch {
+	case err == nil:
+		return false
 	case errors.Is(err, auth.ErrWrongPassword):
 		writeError(w, http.StatusUnauthorized, errWrongCredentials)
-		return
 	case errors.Is(err, auth.ErrThrottled):
 		writeError(w, http.StatusTooManyRequests, errThrottled)
-		return
+	case errors.Is(err, auth.ErrPasskeyRequired):
+		writeError(w, http.StatusForbidden, errPasskeyRequired)
+	case errors.Is(err, auth.ErrNoPRF):
+		writeError(w, http.StatusUnprocessableEntity, errPasskeyNoKey)
+	case errors.Is(err, auth.ErrUnknownPasskey), errors.Is(err, auth.ErrExpired):
+		writeError(w, http.StatusUnauthorized, errPasskeyFailed)
 	case errors.Is(err, mail.ErrUnreachable):
 		log.Printf("sign-in: %v", err)
 		writeError(w, http.StatusBadGateway, errUnreachable)
-		return
-	case err != nil:
+	default:
 		internalError(w, r, err)
-		return
 	}
-	cookie, err := a.Sessions.Create(r.Context(), account, req.Password, session.Password, req.Keep)
+	return true
+}
+
+// startSession signs account in on this browser and answers who is signed in.
+func (a *apiHandler) startSession(w http.ResponseWriter, r *http.Request, account, password, method string, keep bool) {
+	cookie, err := a.Sessions.Create(r.Context(), account, password, method, keep)
 	if err != nil {
 		internalError(w, r, err)
 		return
 	}
 	http.SetCookie(w, cookie)
-	a.Addresses.SeedOnce(mail.Account{ClientIP: a.clientIP(r), Name: account, Password: req.Password})
-	writeJSON(w, http.StatusOK, whoAmI{Account: account, Method: session.Password})
+	a.Addresses.SeedOnce(mail.Account{ClientIP: a.clientIP(r), Name: account, Password: password})
+	writeJSON(w, http.StatusOK, whoAmI{Account: account, Method: method})
 }
 
 type sessionHandler func(http.ResponseWriter, *http.Request, *session.Session)

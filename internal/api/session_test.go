@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -33,9 +34,13 @@ func newHandler(t *testing.T, dist fs.FS) http.Handler {
 	clk := &clock.Clock{}
 	server := &mail.Server{IMAPAddr: "127.0.0.1:1", TLS: &tls.Config{}}
 	pool := mail.NewPool(t.Context(), server, clk.Now)
+	authenticator, err := auth.New(st, clk, server, &url.URL{Scheme: "https", Host: "mail.example.test"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	return NewHandler(dist, Deps{
 		Sessions:       session.NewManager(st, clk, true),
-		Auth:           auth.New(st, clk, server),
+		Auth:           authenticator,
 		Mail:           pool,
 		Addresses:      addressbook.New(st, pool),
 		Store:          st,

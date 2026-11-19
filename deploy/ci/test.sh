@@ -14,6 +14,8 @@ unset COMPOSE_FILE
 # Both seeded accounts share it. Hex only, so it needs no quoting anywhere.
 SEED_PASSWORD="ci-$(openssl rand -hex 12)"
 export SEED_PASSWORD
+POSTBOX_PASSKEY_KEY=$(openssl rand -base64 32)
+export POSTBOX_PASSKEY_KEY
 
 cleanup() {
 	status=$?
@@ -68,7 +70,32 @@ docker compose up --detach postbox-minimal
 docker compose run --rm -T -e POSTBOX_URL=http://postbox-minimal:8080 e2e --project main --grep "health check"
 
 step "browser tests"
-docker compose run --rm -T e2e --project main --project restart-before
+docker compose run --rm -T e2e --project main --project restart-before --project passkey-before
+
+step "criterion 4: postbox.db holds no account password, in plain text, base64 or hex"
+# keyholder has a passkey and a session open by now; every account shares SEED_PASSWORD.
+db=$(mktemp -d)
+docker compose cp postbox:/data/postbox/. "$db" >/dev/null
+[ -n "$(ls "$db")" ] || fail "no state copied from postbox"
+found=
+for form in \
+	"$SEED_PASSWORD" \
+	"$(printf %s "$SEED_PASSWORD" | base64)" \
+	"$(printf %s "$SEED_PASSWORD" | base64 | tr '+/' '-_' | tr -d '=')" \
+	"$(printf %s "$SEED_PASSWORD" | od -An -tx1 | tr -d ' \n')" \
+	"$(printf %s "$SEED_PASSWORD" | od -An -tx1 | tr -d ' \n' | tr a-f A-F)"; do
+	grep -a -r -q -F -- "$form" "$db" && found="$form"
+done
+find "$db" -delete
+[ -z "$found" ] || fail "postbox.db contains the password as $found"
+echo "postbox.db: no password found"
+
+step "criterion 5: postbox passkeys clear lets the password in again"
+out=$(docker compose exec -T postbox postbox passkeys clear guarded@example.test)
+[ "$out" = "Cleared 1 passkeys for guarded@example.test. Require passkey is off." ] ||
+	fail "unexpected passkeys clear output: $out"
+echo "$out"
+docker compose run --rm -T e2e --project passkey-after
 
 step "criterion 2: the blocked sign-in never reached dovecot"
 # The throttling test failed five times from 203.0.113.20, then was blocked. Postbox passes the

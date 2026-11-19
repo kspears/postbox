@@ -1,5 +1,13 @@
 <script lang="ts">
-  import { signIn, type Account, type ErrorCode } from './api';
+  import {
+    cancelled,
+    passkeyNewPassword,
+    passkeySignIn,
+    passkeysSupported,
+    signIn,
+    type Account,
+    type ErrorCode,
+  } from './api';
   import { strings } from './strings';
 
   interface Props {
@@ -14,11 +22,15 @@
   let working = $state(false);
   let error = $state<ErrorCode | null>(null);
 
+  // A passkey sign-in whose stored password the mail server refused: the nonce that takes the
+  // new one.
+  let newPassword = $state<string | null>(null);
+
   async function submit(event: SubmitEvent): Promise<void> {
     event.preventDefault();
     working = true;
     error = null;
-    const result = await signIn(email, password, keep);
+    const result = newPassword ? await passkeyNewPassword(newPassword, password) : await signIn(email, password, keep);
     working = false;
     if (result.ok) {
       onSignedIn(result.value);
@@ -26,6 +38,33 @@
     }
     error = result.error;
     if (error === 'wrong_credentials') password = '';
+    // The new-password step has run out: back to the start.
+    if (newPassword && error === 'passkey_failed') newPassword = null;
+  }
+
+  async function withPasskey(): Promise<void> {
+    working = true;
+    error = null;
+    try {
+      const result = await passkeySignIn().catch(() => null);
+      if (result === null) {
+        error = 'passkey_failed';
+        return;
+      }
+      if (result === cancelled) return;
+      if (!result.ok) {
+        error = result.error;
+        return;
+      }
+      if ('newPassword' in result.value) {
+        newPassword = result.value.newPassword;
+        password = '';
+        return;
+      }
+      onSignedIn(result.value);
+    } finally {
+      working = false;
+    }
   }
 </script>
 
@@ -34,25 +73,32 @@
     <p class="brand">{strings.appName}</p>
     <h1 id="sign-in-title">{strings.signIn.title}</h1>
 
-    {#if notice === 'password_changed' && !error}
-      <p class="notice" role="status">{strings.signIn.passwordChanged}</p>
+    {#if newPassword}
+      <p class="notice" role="status">{strings.signIn.newPassword}</p>
+    {:else}
+      {#if notice === 'password_changed' && !error}
+        <p class="notice" role="status">{strings.signIn.passwordChanged}</p>
+      {/if}
+
+      <label>
+        <span>{strings.signIn.email}</span>
+        <!-- svelte-ignore a11y_autofocus -->
+        <input type="email" name="email" autocomplete="username" required autofocus bind:value={email} />
+      </label>
     {/if}
 
     <label>
-      <span>{strings.signIn.email}</span>
-      <!-- svelte-ignore a11y_autofocus -->
-      <input type="email" name="email" autocomplete="username" required autofocus bind:value={email} />
-    </label>
-
-    <label>
       <span>{strings.signIn.password}</span>
-      <input type="password" name="password" autocomplete="current-password" required bind:value={password} />
+      <!-- svelte-ignore a11y_autofocus -->
+      <input type="password" name="password" autocomplete="current-password" required autofocus={!!newPassword} bind:value={password} />
     </label>
 
-    <label class="keep">
-      <input type="checkbox" name="keep" bind:checked={keep} />
-      <span>{strings.signIn.keep}</span>
-    </label>
+    {#if !newPassword}
+      <label class="keep">
+        <input type="checkbox" name="keep" bind:checked={keep} />
+        <span>{strings.signIn.keep}</span>
+      </label>
+    {/if}
 
     {#if error}
       <p class="error-banner" role="alert">{strings.errors[error as keyof typeof strings.errors] ?? strings.errors.internal}</p>
@@ -61,6 +107,9 @@
     <button type="submit" disabled={working}>
       {working ? strings.signIn.working : strings.signIn.submit}
     </button>
+    {#if passkeysSupported && !newPassword}
+      <button type="button" class="secondary" disabled={working} onclick={withPasskey}>{strings.signIn.passkey}</button>
+    {/if}
   </form>
 </main>
 
@@ -149,6 +198,12 @@
     background: var(--accent);
     color: var(--on-accent);
     cursor: pointer;
+  }
+
+  button.secondary {
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid var(--border);
   }
 
   button:disabled {

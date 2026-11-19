@@ -29,6 +29,8 @@ export default defineConfig({
     { name: 'main', testMatch: /tests\/[^/]+\.spec\.ts$/ },
     { name: 'restart-before', testMatch: /restart\/before\.spec\.ts$/ },
     { name: 'restart-after', testMatch: /restart\/after\.spec\.ts$/ },
+    { name: 'passkey-before', testMatch: /passkey\/before\.spec\.ts$/ },
+    { name: 'passkey-after', testMatch: /passkey\/after\.spec\.ts$/ },
     { name: 'untrusted', testMatch: /untrusted\/[^/]+\.spec\.ts$/ },
     { name: 'outage', testMatch: /outage\/[^/]+\.spec\.ts$/ },
     { name: 'plain', testMatch: /plain\/[^/]+\.spec\.ts$/ },

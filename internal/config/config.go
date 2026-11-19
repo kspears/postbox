@@ -2,6 +2,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"fmt"
 	"net"
 	"net/url"
@@ -17,13 +18,19 @@ type Config struct {
 	Listen         string
 	ClientIPHeader string
 	CAFile         string
+	// PasskeyKey locks the password stored for a passkey that has no PRF output. Without it
+	// such passkeys are refused.
+	PasskeyKey []byte
 }
+
+// DefaultState is the state directory when POSTBOX_STATE is unset.
+const DefaultState = "/data/postbox"
 
 // FromEnv builds a Config from getenv (os.Getenv in production). An unset variable and an
 // empty one are the same. The error names the variable at fault; main prints it after "error: ".
 func FromEnv(getenv func(string) string) (Config, error) {
 	c := Config{
-		State:          "/data/postbox",
+		State:          DefaultState,
 		Listen:         ":8080",
 		ClientIPHeader: getenv("POSTBOX_CLIENT_IP_HEADER"),
 		CAFile:         getenv("POSTBOX_CA_FILE"),
@@ -46,6 +53,13 @@ func FromEnv(getenv func(string) string) (Config, error) {
 			return Config{}, fmt.Errorf("POSTBOX_LISTEN must be [host]:port, got %q", v)
 		}
 		c.Listen = v
+	}
+	if v := getenv("POSTBOX_PASSKEY_KEY"); v != "" {
+		key, err := base64.StdEncoding.DecodeString(v)
+		if err != nil || len(key) != 32 {
+			return Config{}, fmt.Errorf("POSTBOX_PASSKEY_KEY must be 32 random bytes in base64, as `openssl rand -base64 32` makes")
+		}
+		c.PasskeyKey = key
 	}
 	return c, nil
 }

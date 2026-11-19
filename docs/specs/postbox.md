@@ -76,9 +76,10 @@ an operator who deploys the container and runs its CLI.
 ### Passkeys
 
 1. In Settings, a signed-in user chooses "Add a passkey" and completes the browser prompt.
-   Postbox needs the passkey to support the WebAuthn PRF extension, which is known only after
-   the prompt. When it does not, nothing is saved and the user sees "This passkey can't be used
-   with Postbox. Try a different passkey provider."
+   Postbox prefers a passkey that supports the WebAuthn PRF extension, which is known only after
+   the prompt. A passkey without it (1Password and Bitwarden, for example) is accepted when the
+   operator has set `POSTBOX_PASSKEY_KEY`. When neither holds, nothing is saved and the user
+   sees "This passkey can't be used with Postbox. Try a different passkey provider."
 2. From then on, "Sign in with a passkey" signs them in with that passkey, on any device where
    it is available, without typing a password.
 3. Settings lists the account's passkeys with the date each was added and a "Remove" action.
@@ -258,6 +259,7 @@ All new. Environment variables:
 | `POSTBOX_LISTEN` | no | HTTP listen address. Default `:8080`. |
 | `POSTBOX_CLIENT_IP_HEADER` | no | Request header that carries the real client IP, set by the reverse proxy. Unset means the connection's remote address is used. |
 | `POSTBOX_CA_FILE` | no | PEM file of extra certificate authorities trusted for the mail server. |
+| `POSTBOX_PASSKEY_KEY` | no | 32 random bytes in base64 (`openssl rand -base64 32`). Lets passkeys without PRF (1Password, Bitwarden) sign in; their stored passwords are encrypted with it. Changing it breaks those passkeys until they are added again. |
 
 Postbox exits at startup with an error naming the variable when a required one is missing or
 malformed, for example `error: POSTBOX_IMAP_ADDR is required (host:port)`.
@@ -308,7 +310,8 @@ Sign-in:
 - Password sign-in while "Require passkey" is on: the password is checked first. A wrong
   password shows "Wrong email or password." A correct one shows "This account requires a
   passkey."
-- A passkey sign-in where the passkey returns no PRF result shows "This passkey can't be used
+- A passkey sign-in where a PRF passkey returns no PRF result, or a passkey without PRF meets a
+  Postbox whose `POSTBOX_PASSKEY_KEY` is unset or changed, shows "This passkey can't be used
   here. Sign in with your password."
 
 Sessions:
@@ -334,8 +337,9 @@ Passkeys:
   passkey" is on and no passkey is available, the operator runs `postbox passkeys clear`.
 - Removing the last passkey turns "Require passkey" off.
 - A copy of `postbox.db` on its own, without a user's browser cookie or passkey, reveals no
-  account password. No key that decrypts a stored password is kept in the database, on disk, or
-  in the configuration.
+  account password. No key that decrypts a stored password is kept in the database or on disk.
+  The one exception is `POSTBOX_PASSKEY_KEY`, kept in the configuration: with it and a copy of
+  `postbox.db`, the passwords stored for passkeys without PRF can be read.
 
 Mail server:
 
@@ -409,7 +413,8 @@ Reading:
   `HttpOnly`, and `SameSite=Lax` or stricter.
 - TLS to the mail server is mandatory, with certificate verification.
 - Passkeys: the account password is stored encrypted under a key derived from the passkey
-  through the WebAuthn PRF extension. There is no server-held fallback key.
+  through the WebAuthn PRF extension. For a passkey without PRF it is encrypted under a key
+  derived from `POSTBOX_PASSKEY_KEY`; without that setting such passkeys are refused.
 - Sessions: the account password is stored encrypted under a key held only in the browser's
   session cookie.
 - Browsers: the current and previous major versions of Safari (macOS and iOS), Chrome, Firefox,
@@ -446,8 +451,9 @@ Signing in:
    is made from that IP with the correct password, then it shows the same message.
 3. Given a signed-in user who adds a passkey, when they sign out and choose "Sign in with a
    passkey", then the Inbox opens without a password being typed. Given a virtual authenticator
-   without PRF, "Add a passkey" shows "This passkey can't be used with Postbox. Try a different
-   passkey provider." and Settings lists no passkey.
+   without PRF and `POSTBOX_PASSKEY_KEY` set, the same holds. Given a virtual authenticator
+   without PRF and no `POSTBOX_PASSKEY_KEY`, "Add a passkey" shows "This passkey can't be used
+   with Postbox. Try a different passkey provider." and Settings lists no passkey.
 4. Given an account with a passkey and an open session, when `postbox.db` is searched for the
    account password as plain text, base64, and hex, then nothing is found.
 5. Given "Require passkey" is on, when the correct password is submitted, then the screen shows
@@ -575,7 +581,10 @@ performance panel, median of five tries.
 | Sieve and vacation replies | Out for good | Not used | user |
 | Sign-in | Password, plus passkeys in v1 | Secure from the first release | user |
 | Second factor | "Require passkey" switch; no authenticator codes | Less to build than codes; guards Postbox only, stated in the UI | agent default |
-| Passkeys without PRF | Rejected at enrolment; password sign-in only | No server-held key to steal | agent default |
+| Passkeys without PRF | Accepted when `POSTBOX_PASSKEY_KEY` is set, with the password encrypted under a key derived from it; refused otherwise | 1Password and Bitwarden must work as passkey providers. The database alone still reveals nothing; the database and the server's configuration together reveal those passwords | user |
+| Enrolment with a provider that reports no PRF support | Saved straight away under the server key, with no second prompt | Asking again cannot produce a key such a provider lacks | agent default |
+| Removing a passkey, or `postbox passkeys clear` | Also ends the account's passkey sessions, other than the one that asked | A passkey is removed because it was lost; its sessions should not outlive it. Sessions do not record which passkey started them, so all passkey sessions go | agent default |
+| Failed sign-ins with a passkey Postbox does not know | Count against that passkey and the client IP's limit, not an account | One removed passkey retried must not block every passkey sign-in from the address | agent default |
 | Lost passkey | Remove after password sign-in; operator CLI clears when "Require passkey" is on | Simple recovery path | agent default |
 | Password change | Ends password sessions; a passkey asks for the new password once and is kept | No lockout when "Require passkey" is on | user |
 | Accounts | One account per login, several identities | Unified inbox deferred | user |
@@ -650,6 +659,10 @@ performance panel, median of five tries.
 | What `r` replies to | The latest message of the open conversation that is in the open folder, so the person's own reply in Sent is not answered | Replying to one's own sent copy would address the wrong people | agent default |
 | When shortcuts are inactive | While typing in any field or the composer's body, and while a composer, dialog or menu is open | A key in an open composer is text; a dialog has its own keys | agent default |
 | `e` and `#` with conversations ticked | They act on the ticked conversations; with none ticked, on the open one | As the action bar does | agent default |
+| Passkey enrolment when creation gives no PRF output | Settings shows "Use the new passkey once more to finish adding it." with a "Finish" button, which asks the passkey for its PRF output | Some browsers allow one passkey prompt per click | agent default |
+| Turning "Require passkey" on | Ends the account's other password sessions; the session that turned it on stays | Signing the person out in the middle of Settings would surprise them, and they have just shown they hold the account | agent default |
+| A passkey that does not verify, is not registered, or took longer than two minutes | "That passkey didn't work. Try again." | The spec quotes no text for it | agent default |
+| Passkey wording in Settings | Each passkey is listed as "Added <date>"; its Remove button is named "Remove the passkey added <date>"; a failed enrolment for any other reason says "Couldn't add the passkey. Try again." | The spec quotes no text for these | agent default |
 
 ## Open questions
 

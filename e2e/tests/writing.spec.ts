@@ -113,8 +113,11 @@ test('a forward carries the attachment, through Undo and later saves of the reop
     ].join('\r\n'),
     ['MIME-Version: 1.0', 'Content-Type: multipart/mixed; boundary=b1'],
   );
+  // Push is criterion 11's test; here the message only needs to be there.
+  await expect.poll(() => subjectsIn(writer, 'INBOX'), { timeout: 30_000 }).toContain(subject);
+  await page.reload();
   const row = page.getByRole('region', { name: 'Conversations' }).getByRole('listitem').filter({ hasText: subject });
-  await expect(row).toHaveCount(1, { timeout: 10_000 });
+  await expect(row).toHaveCount(1);
   await row.getByRole('link').click();
   await page.getByRole('region', { name: 'Reading pane' }).getByRole('button', { name: 'Forward' }).last().click();
   const forward = page.getByRole('region', { name: `Fwd: ${subject}` });
