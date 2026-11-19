@@ -27,6 +27,8 @@
     type Message,
     type Preferences,
     settings as fetchSettings,
+    search as fetchSearch,
+    type Found,
   } from './api';
   import { untrack } from 'svelte';
   import { SvelteMap, SvelteSet } from 'svelte/reactivity';
@@ -36,10 +38,11 @@
   import ConversationView from './ConversationView.svelte';
   import Dialog from './Dialog.svelte';
   import FolderList from './FolderList.svelte';
+  import SearchResults from './SearchResults.svelte';
   import { applyAppearance } from './appearance';
   import Settings from './Settings.svelte';
   import UndoNotice, { type Notice } from './UndoNotice.svelte';
-  import { closeConversation, openConversation, openFolder, route } from './route.svelte';
+  import { closeConversation, openConversation, openFolder, openMessage, route } from './route.svelte';
   import { strings } from './strings';
 
   interface Props {
@@ -323,6 +326,10 @@
   function markedRead(id: number): void {
     const row = rows.find((r) => r.id === id);
     if (row) row.unread = false;
+    if (searching && openLoaded?.id === id) {
+      const read = new Set(openLoaded.messages.filter((m) => m.folder === route.folder).map((m) => m.uid));
+      for (const r of searching.results) if (r.folder === route.folder && read.has(r.uid)) r.unread = false;
+    }
     loadFolders(true);
   }
 
@@ -394,6 +401,103 @@
     return () => clearInterval(timer);
   });
 
+  // --- search ---
+  // A search shows in place of the folder's list until it is closed. Its scope is set by the
+  // folder it was started from.
+  let searchText = $state('');
+  let searchBox = $state<HTMLInputElement>();
+  let searching = $state<{ query: string; from: string; results: Found[]; next?: number; loading: boolean } | null>(
+    null,
+  );
+  let searchGeneration = 0;
+
+  async function runSearch(query: string, from: string, more = false): Promise<void> {
+    if (!query) return closeSearch();
+    const mine = ++searchGeneration;
+    const offset = more ? (searching?.next ?? 0) : 0;
+    searching = { query, from, results: more ? (searching?.results ?? []) : [], next: undefined, loading: true };
+    const result = await fetchSearch(query, from, offset);
+    if (mine !== searchGeneration || !searching) return;
+    searching.loading = false;
+    if (!result.ok) return failed(result.error);
+    searching.results = [...searching.results, ...result.value.messages];
+    searching.next = result.value.next;
+  }
+
+  function closeSearch(): void {
+    searchGeneration++;
+    searching = null;
+    searchText = '';
+  }
+
+  function openFound(r: Found): void {
+    if (folderList.find((f) => f.name === r.folder)?.role === 'drafts') void compose('draft', r.folder, r.uid);
+    else openMessage(r.folder, r.uid);
+  }
+
+  const folderLabel = (name: string): string => folderList.find((f) => f.name === name)?.label ?? name;
+
+  // --- keyboard shortcuts ---
+  // Inactive while typing, and while a composer, dialog or menu is open.
+  function shortcut(event: KeyboardEvent): void {
+    if (event.key === 'Escape') menuOpen = false;
+    if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return;
+    if (composing || settingsOpen || asking || menuOpen) return;
+    const target = event.target as HTMLElement | null;
+    if (target?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')) return;
+    const role = currentFolder?.role;
+    const acting = checked.length > 0 ? checked : openConversationRow ? [openConversationRow.id] : [];
+    switch (event.key) {
+      case 'c':
+        void compose('new');
+        break;
+      case 'r': {
+        const latest = openLoaded?.messages.filter((m) => m.folder === route.folder).at(-1);
+        if (!latest || openLoaded?.id !== route.conversation) return;
+        void compose('reply', latest.folder, latest.uid);
+        break;
+      }
+      case 'e':
+        if (acting.length === 0 || role === 'archive') return;
+        act('archive', acting);
+        break;
+      case '#':
+        if (acting.length === 0) return;
+        act('delete', acting);
+        break;
+      case '/':
+        searchBox?.focus();
+        break;
+      case 'j':
+      case 'k':
+        step(event.key === 'j' ? 1 : -1);
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
+  }
+
+  // Opens the next (1) or previous (-1) conversation in the list on screen, or the first.
+  function step(by: 1 | -1): void {
+    if (searching) {
+      const list = searching.results;
+      const at = list.findIndex((r) => r.folder === route.folder && r.uid === route.conversation);
+      const r = list[at < 0 ? 0 : at + by];
+      if (r) openFound(r);
+      return;
+    }
+    const at = shownRows.findIndex((r) => r.id === route.conversation);
+    const row = shownRows[at < 0 ? 0 : at + by];
+    if (row) openListed(row);
+  }
+
+  function openListed(row: Conversation): void {
+    // A draft opens in the composer, not the reading pane.
+    if (currentFolder?.role === 'drafts') void compose('draft', route.folder, row.uids.at(-1));
+    else openConversation(row.id);
+  }
+
   // --- actions on conversations ---
 
   function failed(error: ErrorCode): void {
@@ -428,6 +532,7 @@
       return failed(result.error);
     }
     loadFolders(true);
+    if (searching) void runSearch(searching.query, searching.from);
     const moved = result.value;
     notice = {
       text: text(targets.length),
@@ -435,6 +540,7 @@
         const back = await move(moved.folder, moved.uids, { to: folder });
         if (!back.ok) return failed(back.error);
         if (route.folder === folder) await refreshList();
+        if (searching) void runSearch(searching.query, searching.from);
         loadFolders(true);
       },
     };
@@ -621,17 +727,36 @@
     signOutFailed = true;
   }
 
-  function closeOnEscape(event: KeyboardEvent): void {
-    if (event.key === 'Escape') menuOpen = false;
-  }
 </script>
 
-<svelte:window onkeydown={closeOnEscape} />
+<svelte:window onkeydown={shortcut} />
 
 <div class="shell">
   <header>
     <span class="brand">{strings.appName}</span>
     <button type="button" class="compose" onclick={() => compose('new')}>{strings.compose.compose}</button>
+    <form
+      class="search"
+      role="search"
+      onsubmit={(e) => {
+        e.preventDefault();
+        void runSearch(searchText.trim(), route.folder);
+      }}
+    >
+      <input
+        type="search"
+        bind:this={searchBox}
+        bind:value={searchText}
+        aria-label={strings.search.label}
+        placeholder={strings.search.placeholder}
+        onkeydown={(e) => {
+          if (e.key === 'Escape' && searching) {
+            closeSearch();
+            searchBox?.blur();
+          }
+        }}
+      />
+    </form>
     <div class="account">
       <button
         type="button"
@@ -702,6 +827,22 @@
     />
 
     <div class="middle">
+      {#if searching}
+        <div class="title">
+          <h1>{strings.search.heading(searching.query)}</h1>
+          <button type="button" class="close-search" onclick={closeSearch}>{strings.search.close}</button>
+        </div>
+        <SearchResults
+          account={account.account}
+          results={searching.results}
+          loading={searching.loading}
+          hasMore={searching.next !== undefined && !searching.loading}
+          label={folderLabel}
+          selected={route.conversation ? { folder: route.folder, uid: route.conversation } : undefined}
+          onMore={() => searching && runSearch(searching.query, searching.from, true)}
+          onOpen={openFound}
+        />
+      {:else}
       <div class="title">
         <button type="button" class="folders-button" onclick={() => (showFolders = true)}>
           ☰ <span class="visually-hidden">{strings.reading.folders}</span>
@@ -734,12 +875,12 @@
           onCheck={(ids) => (checked = ids)}
           onMore={() => loadPage(false)}
           onOpen={(id) => {
-            // A draft opens in the composer, not the reading pane.
             const row = rows.find((r) => r.id === id);
-            if (currentFolder?.role === 'drafts' && row) void compose('draft', route.folder, row.uids.at(-1));
+            if (row) openListed(row);
             else openConversation(id);
           }}
         />
+      {/if}
       {/if}
     </div>
 
@@ -889,6 +1030,30 @@
     color: var(--on-accent);
     font-weight: 600;
     cursor: pointer;
+  }
+
+  .search {
+    flex: 1;
+    max-width: 36rem;
+    min-width: 0;
+  }
+
+  .search input {
+    width: 100%;
+    padding: 0.4rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--text);
+  }
+
+  .close-search {
+    margin: 0 0.75rem 0 auto;
+    border: none;
+    background: transparent;
+    color: var(--accent);
+    cursor: pointer;
+    white-space: nowrap;
   }
 
   .page-notice {

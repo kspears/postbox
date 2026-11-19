@@ -130,6 +130,30 @@ export async function folders(): Promise<Result<Folder[]>> {
 }
 
 /** The page after cursor; shown is how many conversations are already listed. */
+export interface Found {
+  folder: string;
+  uid: number;
+  subject: string;
+  from: Person[];
+  snippet: string;
+  date: string;
+  unread: boolean;
+  flagged: boolean;
+  attachments: boolean;
+}
+
+export interface SearchPage {
+  messages: Found[];
+  next?: number;
+}
+
+/** A page of the messages matching q, searched from folder. */
+export function search(q: string, folder: string, offset = 0): Promise<Result<SearchPage>> {
+  const query = new URLSearchParams({ q, folder });
+  if (offset) query.set('offset', String(offset));
+  return call('GET', `/api/search?${query}`);
+}
+
 export function conversations(folder: string, cursor?: number, shown = 0): Promise<Result<ConversationPage>> {
   const query = new URLSearchParams({ folder });
   if (cursor) {
