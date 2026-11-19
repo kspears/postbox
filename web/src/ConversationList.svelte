@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Conversation } from './api';
   import { conversationType } from './FolderList.svelte';
+  import { longDate, when, who } from './listFormat';
   import { path } from './route.svelte';
   import { strings } from './strings';
 
@@ -94,25 +95,6 @@
     return () => observer.disconnect();
   });
 
-  function who(c: Conversation): string {
-    const names = c.participants.map((p) =>
-      p.email === account ? 'me' : p.name || p.email.split('@')[0] || p.email,
-    );
-    return names.slice(0, 3).join(', ') + (names.length > 3 ? ' …' : '');
-  }
-
-  const today = new Date();
-  const time = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
-  const dayMonth = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' });
-  const full = new Intl.DateTimeFormat(undefined, { dateStyle: 'short' });
-  const long = new Intl.DateTimeFormat(undefined, { dateStyle: 'full', timeStyle: 'short' });
-
-  function when(iso: string): string {
-    const d = new Date(iso);
-    if (d.toDateString() === today.toDateString()) return time.format(d);
-    if (d.getFullYear() === today.getFullYear()) return dayMonth.format(d);
-    return full.format(d);
-  }
 </script>
 
 <section class="list" aria-label="Conversations">
@@ -153,11 +135,11 @@
           draggable="false"
         >
         <div class="top">
-          <span class="who">{who(c)}</span>
+          <span class="who">{who(c.participants, account)}</span>
           {#if c.count > 1}<span class="count" aria-label={strings.list.messages(c.count)}>{c.count}</span>{/if}
           {#if c.attachments}<span class="mark" role="img" aria-label={strings.list.attachment}>📎</span>{/if}
           {#if c.flagged}<span class="mark flag" role="img" aria-label={strings.list.flagged}>⚑</span>{/if}
-          <time datetime={c.date} title={long.format(new Date(c.date))}>{when(c.date)}</time>
+          <time datetime={c.date} title={longDate(c.date)}>{when(c.date)}</time>
         </div>
         <div class="subject">
           {#if c.unread}<span class="dot" role="img" aria-label={strings.list.unread}></span>{/if}

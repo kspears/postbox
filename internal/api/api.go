@@ -71,6 +71,7 @@ func NewHandler(dist fs.FS, d Deps) http.Handler {
 	mux.HandleFunc("POST /api/send/undo", a.withSession(a.undoSend))
 	mux.HandleFunc("GET /api/send", a.withSession(a.sendStatus))
 	mux.HandleFunc("GET /api/addresses", a.withSession(a.addresses))
+	mux.HandleFunc("GET /api/search", a.withSession(a.search))
 	mux.HandleFunc("GET /api/notices", a.withSession(a.notices))
 	mux.HandleFunc("POST /api/notices/dismiss", a.withSession(a.dismissNotice))
 	mux.HandleFunc("GET /api/settings", a.withSession(a.settings))

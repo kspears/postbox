@@ -3,3 +3,5 @@ bob@example.test OK
 reader@example.test OK
 organiser@example.test OK
 writer@example.test OK
+searcher@example.test OK
+keys@example.test OK

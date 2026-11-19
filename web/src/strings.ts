@@ -165,6 +165,16 @@ export const strings = {
     messages: (n: number) => `${n} messages`,
   },
 
+  search: {
+    label: 'Search mail',
+    placeholder: 'Search',
+    results: 'Search results',
+    heading: (q: string) => `Results for “${q}”`,
+    none: 'No messages match.',
+    searching: 'Searching…',
+    close: 'Close search',
+  },
+
   reading: {
     nothingSelected: 'Select a conversation to read it.',
     back: 'Back',

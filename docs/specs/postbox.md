@@ -644,6 +644,12 @@ performance panel, median of five tries.
 | Where the blocked-image count comes from | The body document carries it in a `meta` element that the app reads from the frame | The app learns it without fetching and rendering each body twice | agent default |
 | How the client IP reaches the IMAP server | Postbox sends the `ID` command with `x-originating-ip` itself, before handing the connection to the IMAP library | The library's `ID` cannot carry that field; a PROXY-protocol listener would need extra ports on every mail server | user |
 | Threading headers on the mail server | Dovecot records them when mail is saved (`mail_always_cache_fields`), and existing mailboxes are warmed once at cutover | Measured: without it the first open of a 90,000-message folder took 6.4 minutes; with it, well under a second | agent default |
+| How a search query matches | A message matches when every word appears in its sender, To, Cc, Bcc, subject or body; a phrase in double quotes counts as one word | What people expect of a single search box; the server's own search does the matching | agent default |
+| Search wording | The results are headed "Results for “<query>”", each shows its folder's name, an empty search shows "No messages match.", and "Close search" returns to the folder | The spec quoted no text for search | agent default |
+| Opening a search result | Opens the conversation that holds the message, in the message's folder; a result in Drafts opens the composer | The reading pane shows conversations everywhere else | agent default |
+| What `r` replies to | The latest message of the open conversation that is in the open folder, so the person's own reply in Sent is not answered | Replying to one's own sent copy would address the wrong people | agent default |
+| When shortcuts are inactive | While typing in any field or the composer's body, and while a composer, dialog or menu is open | A key in an open composer is text; a dialog has its own keys | agent default |
+| `e` and `#` with conversations ticked | They act on the ticked conversations; with none ticked, on the open one | As the action bar does | agent default |
 
 ## Open questions
 

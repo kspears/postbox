@@ -81,7 +81,7 @@ export interface ConversationPage {
 
 export type Result<T> = { ok: true; value: T } | { ok: false; error: ErrorCode };
 
-async function call<T>(method: string, path: string, body?: unknown): Promise<Result<T>> {
+async function call<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<Result<T>> {
   let response: Response;
   try {
     response = await fetch(path, {
@@ -89,6 +89,7 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<Re
       headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
       credentials: 'same-origin',
+      signal,
     });
   } catch {
     // No answer at all: Postbox itself is unreachable.
@@ -127,6 +128,22 @@ export async function signOut(everywhere: boolean): Promise<boolean> {
 export async function folders(): Promise<Result<Folder[]>> {
   const result = await call<{ folders: Folder[] }>('GET', '/api/folders');
   return result.ok ? { ok: true, value: result.value.folders } : result;
+}
+
+export interface Found extends Conversation {
+  folder: string;
+}
+
+export interface SearchPage {
+  messages: Found[];
+  next?: number;
+}
+
+/** A page of the messages matching q, searched from folder. */
+export function search(q: string, folder: string, offset: number, signal: AbortSignal): Promise<Result<SearchPage>> {
+  const query = new URLSearchParams({ q, folder });
+  if (offset) query.set('offset', String(offset));
+  return call('GET', `/api/search?${query}`, undefined, signal);
 }
 
 /** The page after cursor; shown is how many conversations are already listed. */
