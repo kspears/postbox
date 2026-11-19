@@ -254,19 +254,23 @@
   let foldersInFlight = false;
   let foldersAt = 0;
 
-  // A forced refresh asked for while one is in flight runs once that one ends, and the caller
-  // waits for it: an answer that left before a change must not stand for the state after it.
+  // A forced refresh asked for while one is in flight runs once that one ends, and every caller
+  // asking meanwhile waits for that same one: an answer that left before a change must not
+  // stand for the state after it.
   let foldersRunning: Promise<void> = Promise.resolve();
-  let foldersAgain = false;
+  let foldersNext: Promise<void> | null = null;
 
   function loadFolders(force = false): Promise<void> {
     if (foldersInFlight) {
-      if (force) foldersAgain = true;
-      return foldersRunning.then(() => (foldersAgain ? loadFolders(true) : undefined));
+      if (!force) return foldersRunning;
+      foldersNext ??= foldersRunning.then(() => {
+        foldersNext = null;
+        return loadFolders(true);
+      });
+      return foldersNext;
     }
     if (!force && Date.now() - foldersAt < 10_000) return Promise.resolve();
     foldersInFlight = true;
-    foldersAgain = false;
     foldersRunning = (async () => {
       const result = await fetchFolders();
       foldersInFlight = false;
