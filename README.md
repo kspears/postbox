@@ -3,9 +3,9 @@
 A web mail client in one container. Postbox talks IMAP and SMTP submission to the mail server
 you already run and keeps no copy of your mail.
 
-Status: early development. You can sign in, read and organise mail (archive, delete, spam,
-move, flag, folders, drag and drop), with remote images blocked and new mail arriving live.
-Writing mail comes next.
+Status: early development. You can sign in, read, organise and write mail: plain-text
+messages, replies and forwards, drafts, and sending with a ten-second undo. Rich text,
+attachments from your computer, identities and signatures come next.
 The specification is [docs/specs/postbox.md](docs/specs/postbox.md).
 
 ## Configuration
@@ -44,7 +44,7 @@ just check   # everything CI runs, including the browser tests in containers
 `deploy/ci/.dev/password`. `reader@example.test` has a thread with a reply in Sent, messages
 with remote and embedded images, and an attachment; `hostile@example.test` holds the hostile
 HTML corpus from `testdata/hostile`; `organiser@example.test` has mail to archive, delete, move
-and flag. `just dev-down` stops the stack and keeps its mail.
+and flag; `writer@example.test` is free to send from. `just dev-down` stops the stack and keeps its mail.
 
 ## Licence
 

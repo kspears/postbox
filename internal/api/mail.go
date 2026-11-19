@@ -43,6 +43,8 @@ func (a *apiHandler) answerMailError(w http.ResponseWriter, r *http.Request, s *
 		writeError(w, http.StatusNotFound, errNotFound)
 	case errors.Is(err, mail.ErrFolderExists):
 		writeError(w, http.StatusConflict, errFolderExists)
+	case errors.Is(err, errDraftSending):
+		writeError(w, http.StatusConflict, errSending)
 	case errors.Is(err, mail.ErrSpecialFolder), errors.Is(err, mail.ErrIntoItself), errors.Is(err, mail.ErrNotTrash):
 		writeError(w, http.StatusBadRequest, errBadRequest)
 	case errors.Is(err, mail.ErrUnreachable):

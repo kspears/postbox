@@ -2,7 +2,7 @@
   import type { Snippet } from 'svelte';
   import { attachmentURL, conversation, markRead, type ErrorCode, type Message, type Person } from './api';
   import MessageBody from './MessageBody.svelte';
-  import { strings } from './strings';
+  import { fileSize, strings } from './strings';
 
   interface Props {
     account: string;
@@ -13,12 +13,14 @@
     onError: (error: ErrorCode) => void;
     // Changes when the conversation's row in the list changes, so it is fetched again.
     refresh: string;
+    // Reply, Reply all or Forward pressed on a message.
+    onCompose: (mode: 'reply' | 'replyAll' | 'forward', message: Message) => void;
     // Told the messages each time they load, so actions act on what is shown.
     onLoaded: (folder: string, id: number, messages: Message[]) => void;
     // The actions for this conversation.
     children?: Snippet;
   }
-  const { account, folder, id, onBack, onRead, onError, refresh, onLoaded, children }: Props = $props();
+  const { account, folder, id, onBack, onRead, onError, refresh, onCompose, onLoaded, children }: Props = $props();
 
   let messages = $state<Message[]>([]);
   let gone = $state(false);
@@ -69,14 +71,6 @@
   }
 
   const long = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
-
-  function size(bytes: number): string {
-    // The encoded size; the file is about three quarters of it.
-    const n = (bytes * 3) / 4;
-    if (n < 1024) return `${Math.max(1, Math.round(n))} B`;
-    if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
-    return `${(n / 1024 / 1024).toFixed(1)} MB`;
-  }
 </script>
 
 <section class="reading" aria-label="Reading pane">
@@ -113,13 +107,21 @@
           onAllowSender={(s) => (allowedSenders = [...allowedSenders, s])}
         />
 
+        <div class="respond">
+          <button type="button" onclick={() => onCompose('reply', m)}>{strings.compose.reply}</button>
+          {#if m.to.length + m.cc.length > 1}
+            <button type="button" onclick={() => onCompose('replyAll', m)}>{strings.compose.replyAll}</button>
+          {/if}
+          <button type="button" onclick={() => onCompose('forward', m)}>{strings.compose.forward}</button>
+        </div>
+
         {#if m.attachments.length > 0}
           <ul class="attachments" aria-label={strings.reading.attachments}>
             {#each m.attachments as a (a.part)}
               <li>
                 <a href={attachmentURL(m, a.part)} download={a.name} aria-label={strings.reading.download(a.name)}>
                   <span class="file">{a.name}</span>
-                  <span class="size">{size(a.size)}</span>
+                  <span class="size">{fileSize((a.size * 3) / 4)}</span>
                 </a>
               </li>
             {/each}
@@ -207,6 +209,26 @@
 
   .to {
     grid-column: 1 / -1;
+  }
+
+  .respond {
+    display: flex;
+    gap: 0.4rem;
+    margin-top: 0.75rem;
+  }
+
+  .respond button {
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 0.3rem 0.85rem;
+    background: var(--surface);
+    color: var(--text);
+    font-size: 0.85rem;
+    cursor: pointer;
+  }
+
+  .respond button:hover {
+    background: var(--hover);
   }
 
   .attachments {

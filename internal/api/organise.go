@@ -17,7 +17,12 @@ const folderOrderKey = "folder_order"
 
 // decode reads a small JSON request body into v, answering 400 itself when it cannot.
 func decode(w http.ResponseWriter, r *http.Request, v any) bool {
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256<<10)).Decode(v); err != nil {
+	return decodeUpTo(w, r, v, 256<<10)
+}
+
+// decodeUpTo is decode for a body of up to limit bytes.
+func decodeUpTo(w http.ResponseWriter, r *http.Request, v any, limit int64) bool {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, limit)).Decode(v); err != nil {
 		writeError(w, http.StatusBadRequest, errBadRequest)
 		return false
 	}

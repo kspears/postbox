@@ -50,6 +50,46 @@ export const strings = {
       `Delete “${name}”, its ${subfolders} subfolders, and the ${messages} messages in them? This cannot be undone.`,
   },
 
+  compose: {
+    compose: 'Compose',
+    newMessage: 'New message',
+    from: 'From',
+    to: 'To',
+    cc: 'Cc',
+    bcc: 'Bcc',
+    showCcBcc: 'Cc / Bcc',
+    subject: 'Subject',
+    body: 'Message',
+    send: 'Send',
+    discard: 'Discard',
+    close: 'Close',
+    saved: 'Draft saved',
+    saving: 'Saving…',
+    removeAttachment: (name: string) => `Remove ${name}`,
+    noRecipients: 'Add at least one recipient.',
+    badAddress: (text: string) => `“${text}” is not an email address.`,
+    rejected: 'The mail server rejected this message:',
+    // Why a message could not be sent, when the mail server did not say in its own words.
+    failure: {
+      refused: 'The mail server did not accept the password.',
+      unreachable: 'The mail server could not be reached.',
+      unreadable: 'The draft could not be read from Drafts.',
+      invalid: 'The message has no sender or no recipients.',
+    },
+    inWindow: 'This message is being sent. Use Undo to change it.',
+    unsaved: 'This draft has not been saved. Fix the problem above, or use Discard.',
+    sending: 'Sending…',
+    sent: 'Sent.',
+    sentNoCopy: 'Sent, but a copy could not be saved to Sent.',
+    failedLater: 'A message could not be sent and is in Drafts:',
+    unsent: 'A message was not sent and is in Drafts.',
+    maybeSent: 'A message may have been sent. Check Sent before sending it again.',
+    dismiss: 'Dismiss',
+    reply: 'Reply',
+    replyAll: 'Reply all',
+    forward: 'Forward',
+  },
+
   actions: {
     archive: 'Archive',
     delete: 'Delete',
@@ -104,3 +144,10 @@ export const strings = {
     me: 'me',
   },
 } as const;
+
+/** A file size as people read it: 512 B, 40 KB, 2.5 MB. */
+export function fileSize(bytes: number): string {
+  if (bytes < 1024) return `${Math.max(1, Math.round(bytes))} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}

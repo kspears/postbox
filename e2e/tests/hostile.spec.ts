@@ -11,7 +11,7 @@ test('criterion 13: the hostile corpus runs no script and makes no outside reque
   test.setTimeout(120_000);
   // Postbox's own requests for the app, the list and each message. Anything else, to Postbox's
   // address or another, came from a message.
-  const own = /^\/(folder\/|assets\/|api\/(session|folders|conversations?|body|seen|events)(\?|$))/;
+  const own = /^\/(folder\/|assets\/|api\/(session|folders|conversations?|body|seen|events|notices)(\?|$))/;
   const outside: string[] = [];
   page.on('request', (r) => {
     const url = new URL(r.url());

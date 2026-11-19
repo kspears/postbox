@@ -1,5 +1,13 @@
 <script lang="ts">
   import {
+    composer as fetchComposer,
+    dismissNotice,
+    notices as fetchNotices,
+    sendStatus,
+    undoSend,
+    type ComposeMode,
+    type ComposerView,
+    type SendStatus,
     conversations as fetchConversations,
     createFolder,
     deleteFolder,
@@ -20,6 +28,7 @@
   import { untrack } from 'svelte';
   import { SvelteMap, SvelteSet } from 'svelte/reactivity';
   import ActionBar, { type Action } from './ActionBar.svelte';
+  import Composer from './Composer.svelte';
   import ConversationList from './ConversationList.svelte';
   import ConversationView from './ConversationView.svelte';
   import Dialog from './Dialog.svelte';
@@ -57,6 +66,103 @@
   let listLoaded = $state(false);
   // Bumped whenever the open folder changes, so answers for the old one are dropped.
   let generation = 0;
+
+  // --- writing ---
+  // problem: why the last attempt to send this message failed.
+  let composing = $state<{ view: ComposerView; problem?: string } | null>(null);
+  // Outcomes of earlier sends the person has not been told, from before this page loaded.
+  let pageNotices = $state<SendStatus[]>([]);
+
+  async function compose(mode: ComposeMode, folder?: string, uid?: number, problem?: string): Promise<void> {
+    const result = await fetchComposer(mode, folder, uid);
+    if (!result.ok) {
+      if (result.error === 'sending') notice = { text: strings.compose.inWindow };
+      else failed(result.error);
+      return;
+    }
+    composing = { view: result.value, problem };
+  }
+
+  function composerClosed(): void {
+    composing = null;
+    if (currentFolder?.role === 'drafts') refreshList();
+    loadFolders(true);
+  }
+
+  // After "Send": "Sending…" with Undo for the window, then what became of it. A failure reopens
+  // the composer saying why. The window runs on the server and does not pause, so the Undo goes
+  // when it ends even while the pointer rests on the notice.
+  function sent(id: string): void {
+    composing = null;
+    const sending: Notice = {
+      text: strings.compose.sending,
+      undo: async () => {
+        const back = await undoSend(id);
+        if (back.ok) {
+          undone = true;
+          if (notice === mine) notice = null;
+          void compose('draft', back.value.folder, back.value.uid);
+        } else show(back.error === 'too_late' ? { text: strings.compose.sending } : { text: strings.actions.failed });
+      },
+    };
+    // This send's latest notice, as the state holds it (a proxy, not the object assigned); a
+    // newer one for something else is left alone.
+    let mine: Notice | null = null;
+    let undone = false;
+    const show = (n: Notice): void => {
+      if (undone || (notice !== mine && notice !== null)) return;
+      notice = n;
+      mine = notice;
+    };
+    notice = sending;
+    mine = notice;
+    setTimeout(() => show({ text: strings.compose.sending }), 9_000);
+    void watchSend(id, show);
+  }
+
+  // Nothing changes before the ten-second undo window ends, so the first look waits it out.
+  async function watchSend(id: string, show: (n: Notice) => void): Promise<void> {
+    for (let tries = 0; tries < 600; tries++) {
+      await new Promise((resolve) => setTimeout(resolve, tries === 0 ? 10_000 : 1000));
+      const status = await sendStatus(id);
+      if (!status.ok) return; // undone, or told elsewhere
+      const s = status.value;
+      if (s.state === 'waiting' || s.state === 'submitting') continue;
+      if (s.state === 'failed') void compose('draft', s.draftsFolder, s.draftUid, failureText(s, strings.compose.rejected));
+      else show({ text: noticeText(s) });
+      void dismissNotice(id);
+      loadFolders(true);
+      if (currentFolder?.role === 'sent' || currentFolder?.role === 'drafts') refreshList();
+      return;
+    }
+  }
+
+  // Why a send failed: the server's words after prefix when it refused the message, else ours.
+  function failureText(n: SendStatus, prefix: string): string {
+    if (n.reason === 'rejected') return `${prefix} ${n.error ?? ''}`;
+    return n.reason ? strings.compose.failure[n.reason] : strings.actions.failed;
+  }
+
+  function noticeText(n: SendStatus): string {
+    switch (n.state) {
+      case 'failed':
+        return n.reason === 'rejected' ? failureText(n, strings.compose.failedLater) : `${strings.compose.failedLater} ${failureText(n, '')}`;
+      case 'unsent':
+        return strings.compose.unsent;
+      case 'unknown':
+        return strings.compose.maybeSent;
+      case 'sent':
+        return strings.compose.sent;
+      default:
+        return strings.compose.sentNoCopy;
+    }
+  }
+
+  $effect(() => {
+    fetchNotices().then((result) => {
+      if (result.ok) pageNotices = result.value;
+    });
+  });
 
   // Read and flag changes made here, kept until a list refresh that began after the server had
   // them, so an older answer cannot undo them on screen.
@@ -501,6 +607,7 @@
 <div class="shell">
   <header>
     <span class="brand">{strings.appName}</span>
+    <button type="button" class="compose" onclick={() => compose('new')}>{strings.compose.compose}</button>
     <div class="account">
       <button
         type="button"
@@ -529,6 +636,18 @@
   {#if signOutFailed}
     <p class="error-banner banner" role="alert">{strings.account.signOutFailed}</p>
   {/if}
+  {#each pageNotices as n (n.id)}
+    <div class="error-banner banner page-notice" role="alert">
+      <span>{noticeText(n)}</span>
+      <button
+        type="button"
+        onclick={() => {
+          pageNotices = pageNotices.filter((p) => p.id !== n.id);
+          void dismissNotice(n.id);
+        }}>{strings.compose.dismiss}</button
+      >
+    </div>
+  {/each}
 
   <div class="panes" data-view={view}>
     <FolderList
@@ -582,7 +701,12 @@
           {checked}
           onCheck={(ids) => (checked = ids)}
           onMore={() => loadPage(false)}
-          onOpen={openConversation}
+          onOpen={(id) => {
+            // A draft opens in the composer, not the reading pane.
+            const row = rows.find((r) => r.id === id);
+            if (currentFolder?.role === 'drafts' && row) void compose('draft', route.folder, row.uids.at(-1));
+            else openConversation(id);
+          }}
         />
       {/if}
     </div>
@@ -597,6 +721,7 @@
         onError={(e) => (listFailure = handle(e))}
         refresh={openRowState}
         onLoaded={(folder, id, messages) => (openLoaded = { folder, id, messages })}
+        onCompose={(mode, m) => compose(mode, m.folder, m.uid)}
       >
         {#if openConversationRow}
           {@const target = openConversationRow}
@@ -626,6 +751,18 @@
     <button type="button" onclick={() => (asking = null)}>{strings.actions.cancel}</button>
   </div>
 {/snippet}
+
+{#if composing}
+  {#key composing}
+    <Composer
+      view={composing.view}
+      problem={composing.problem}
+      onSent={sent}
+      onClose={composerClosed}
+      onError={failed}
+    />
+  {/key}
+{/if}
 
 {#if notice}
   <UndoNotice {notice} onDone={() => (notice = null)} />
@@ -696,6 +833,33 @@
 
   .account {
     position: relative;
+    margin-left: auto;
+  }
+
+  .compose {
+    margin-left: 1.5rem;
+    border: none;
+    border-radius: 999px;
+    padding: 0.4rem 1rem;
+    background: var(--accent);
+    color: var(--on-accent);
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .page-notice {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 1rem;
+  }
+
+  .page-notice button {
+    border: none;
+    background: transparent;
+    color: inherit;
+    text-decoration: underline;
+    cursor: pointer;
   }
 
   .account-button {

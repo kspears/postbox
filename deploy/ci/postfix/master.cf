@@ -5,7 +5,9 @@
 # Port 25: mail from outside, for tests that play another sender. No AUTH.
 smtp       inet  n       -       n       -       -       smtpd
 
-# Port 587: STARTTLS, authentication required, sender must belong to the login.
+# Port 587: STARTTLS, authentication required, sender must belong to the login. Postbox may pass
+# the person's address with XCLIENT; in the test stack any private address is trusted to, in
+# production only the Postbox container.
 submission inet  n       -       n       -       -       smtpd
   -o syslog_name=postfix/submission
   -o smtpd_tls_security_level=encrypt
@@ -13,6 +15,7 @@ submission inet  n       -       n       -       -       smtpd
   -o smtpd_client_restrictions=permit_sasl_authenticated,reject
   -o smtpd_sender_restrictions=reject_sender_login_mismatch,reject_non_fqdn_sender
   -o smtpd_relay_restrictions=permit_sasl_authenticated,reject
+  -o smtpd_authorized_xclient_hosts=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
 
 # Port 465: implicit TLS, otherwise identical to 587.
 submissions inet n       -       n       -       -       smtpd
@@ -23,6 +26,7 @@ submissions inet n       -       n       -       -       smtpd
   -o smtpd_client_restrictions=permit_sasl_authenticated,reject
   -o smtpd_sender_restrictions=reject_sender_login_mismatch,reject_non_fqdn_sender
   -o smtpd_relay_restrictions=permit_sasl_authenticated,reject
+  -o smtpd_authorized_xclient_hosts=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
 
 pickup     unix  n       -       n       60      1       pickup
 cleanup    unix  n       -       n       -       0       cleanup

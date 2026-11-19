@@ -31,6 +31,8 @@ export default defineConfig({
     { name: 'restart-after', testMatch: /restart\/after\.spec\.ts$/ },
     { name: 'untrusted', testMatch: /untrusted\/[^/]+\.spec\.ts$/ },
     { name: 'outage', testMatch: /outage\/[^/]+\.spec\.ts$/ },
+    { name: 'plain', testMatch: /plain\/[^/]+\.spec\.ts$/ },
+    { name: 'send-before-restart', testMatch: /restart\/send\.spec\.ts$/ },
     // Moves the server's clock forward for good, so it runs last.
     { name: 'clock', testMatch: /clock\/[^/]+\.spec\.ts$/ },
   ],

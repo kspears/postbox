@@ -21,6 +21,8 @@ services:
       - auth:/auth
       - vmail:/var/vmail
       - vmail_index:/var/vmail_index
+      - vmail_plain:/var/vmail_plain
+      - vmail_plain_index:/var/vmail_plain_index
     restart: "no"
 
   dovecot:
@@ -34,6 +36,23 @@ services:
       - auth:/auth:ro
       - vmail:/var/vmail
       - vmail_index:/var/vmail_index
+    tmpfs:
+      - /var/volatile:uid=5000,gid=5000,mode=0700
+
+  # A second dovecot that marks no special-use folders (criterion 20). Same accounts, mailboxes
+  # of its own.
+  dovecot-plain:
+    image: dovecot/dovecot:2.4.5-root@sha256:e4e02686612ef57bce02ada4771e4a46dab7592e3e0498cccfcf2227138e26a9
+    profiles: [tools]
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    volumes:
+      - ./dovecot/dovecot.conf:/etc/dovecot/dovecot.conf:ro
+      - keys:/keys:ro
+      - auth:/auth:ro
+      - vmail_plain:/var/vmail
+      - vmail_plain_index:/var/vmail_index
     tmpfs:
       - /var/volatile:uid=5000,gid=5000,mode=0700
 
@@ -137,6 +156,28 @@ services:
         aliases:
           - postbox-untrusted.localhost
 
+  # Postbox in front of dovecot-plain, sending through the same postfix (criterion 20).
+  postbox-plain:
+    image: postbox:ci
+    pull_policy: never # built by the postbox service above
+    profiles: [tools]
+    depends_on:
+      - dovecot-plain
+      - postfix
+    environment:
+      POSTBOX_IMAP_ADDR: dovecot-plain:993
+      POSTBOX_SMTP_ADDR: postfix:465
+      POSTBOX_PUBLIC_URL: http://postbox-plain.localhost
+      POSTBOX_LISTEN: :80
+      POSTBOX_CA_FILE: /ca/ca.crt
+      POSTBOX_CLIENT_IP_HEADER: X-Test-Client-IP
+    volumes:
+      - ca:/ca:ro
+    networks:
+      default:
+        aliases:
+          - postbox-plain.localhost
+
   # Playwright with Chromium. Run with `docker compose run --rm e2e`.
   e2e:
     image: postbox-ci-e2e
@@ -161,6 +202,8 @@ volumes:
   vmail_index:
   postfix_queue:
   state:
+  vmail_plain:
+  vmail_plain_index:
   e2e_state:
   go_cache:
   go_mod:
