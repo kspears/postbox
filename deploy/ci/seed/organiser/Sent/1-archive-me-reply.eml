@@ -1,0 +1,11 @@
+From: Organiser <organiser@example.test>
+To: Bob <bob@example.test>
+Subject: Re: Archive me
+Date: Mon, 16 Nov 2026 09:30:00 +0000
+Message-ID: <org-reply-1@example.test>
+In-Reply-To: <org-1@example.test>
+References: <org-1@example.test>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+My reply, which stays in Sent.

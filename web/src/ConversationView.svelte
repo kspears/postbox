@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { Snippet } from 'svelte';
   import { attachmentURL, conversation, markRead, type ErrorCode, type Message, type Person } from './api';
   import MessageBody from './MessageBody.svelte';
   import { strings } from './strings';
@@ -12,8 +13,12 @@
     onError: (error: ErrorCode) => void;
     // Changes when the conversation's row in the list changes, so it is fetched again.
     refresh: string;
+    // Told the messages each time they load, so actions act on what is shown.
+    onLoaded: (folder: string, id: number, messages: Message[]) => void;
+    // The actions for this conversation.
+    children?: Snippet;
   }
-  const { account, folder, id, onBack, onRead, onError, refresh }: Props = $props();
+  const { account, folder, id, onBack, onRead, onError, refresh, onLoaded, children }: Props = $props();
 
   let messages = $state<Message[]>([]);
   let gone = $state(false);
@@ -41,6 +46,7 @@
         return;
       }
       messages = result.value;
+      onLoaded(want.folder, want.id, messages);
       // Shown means read: mark this folder's unread messages of the conversation.
       const unread = messages.filter((m) => m.unread && m.folder === want.folder).map((m) => m.uid);
       if (unread.length === 0) return;
@@ -76,6 +82,7 @@
 <section class="reading" aria-label="Reading pane">
   <div class="bar">
     <button type="button" class="back" onclick={onBack}>← {strings.reading.back}</button>
+    {@render children?.()}
   </div>
 
   {#if gone}
@@ -140,9 +147,16 @@
     background: var(--bg);
   }
 
+  .bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 1rem;
+  }
+
   /* The back button is for phone width, where the list is not on screen beside this pane. */
   @media (min-width: 768px) {
-    .bar {
+    .back {
       display: none;
     }
   }

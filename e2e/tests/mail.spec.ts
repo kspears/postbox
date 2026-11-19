@@ -8,7 +8,8 @@ test.describe('folder list', () => {
     await signIn(page, alice, seedPassword());
     await expectInbox(page);
     const nav = page.getByRole('navigation', { name: 'Folders' });
-    await expect(nav.getByRole('button')).toHaveText([/^Inbox/, 'Drafts', 'Sent', 'Archive', 'Junk', 'Trash']);
+    // Each folder's own button; the "Actions for …" menu buttons are not folders.
+    await expect(nav.getByRole('button', { name: /^(?!Actions for)/ })).toHaveText([/^Inbox/, 'Drafts', 'Sent', 'Archive', 'Junk', 'Trash', '+ New folder']);
     // alice has four unread messages from the seed.
     await expect(nav.getByRole('button', { name: /^Inbox/ }).getByLabel('4 unread')).toBeVisible();
   });
@@ -16,7 +17,7 @@ test.describe('folder list', () => {
   test('opening a folder changes the address and survives a reload', async ({ page }) => {
     await signIn(page, alice, seedPassword());
     await expectInbox(page);
-    await page.getByRole('navigation', { name: 'Folders' }).getByRole('button', { name: 'Sent' }).click();
+    await page.getByRole('navigation', { name: 'Folders' }).getByRole('button', { name: 'Sent', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Sent' })).toBeVisible();
     await expect(page).toHaveURL(/\/folder\/Sent$/);
     await expect(page.getByText('No conversations here.')).toBeVisible();

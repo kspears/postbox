@@ -26,6 +26,6 @@ docker compose up --detach --build
 cat <<MESSAGE
 
 Postbox is at http://localhost:$POSTBOX_DEV_PORT
-Accounts: alice, bob, reader and hostile @example.test
+Accounts: alice, bob, reader, organiser and hostile @example.test
 Password: in deploy/ci/.dev/password
 MESSAGE

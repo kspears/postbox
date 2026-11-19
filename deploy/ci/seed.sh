@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Fills the test mailboxes, once:
 #   seed/<account>/*.eml      delivered to <account>@example.test through postfix
-#   seed/<account>/Sent/*.eml written straight into that account's Sent folder
+#   seed/<account>/<Folder>/*.eml written straight into that folder of the account
 #   testdata/hostile/*.eml    written straight into hostile@example.test's Inbox
 # A folder that already has mail is left alone, so `just dev` can run again without piling up
 # copies. Finds the stack the way `docker compose` does: COMPOSE_PROJECT_NAME and COMPOSE_FILE,
@@ -42,6 +42,10 @@ save() {
 		docker compose exec -T dovecot doveadm save -u "$account" -m "$folder" <"$message"
 		want=$((want + 1))
 	done
+	# What a person sent, they have read.
+	if [ "$folder" = Sent ]; then
+		docker compose exec -T dovecot doveadm flags add -u "$account" '\Seen' mailbox Sent all
+	fi
 	echo "seed: $account $folder has $want messages"
 }
 
@@ -62,9 +66,10 @@ for dir in seed/*/; do
 		wait_for "$account" INBOX "$want"
 	done
 	echo "seed: $account has $want messages"
-	if [ -d "${dir}Sent" ]; then
-		save "$account" Sent "${dir}"Sent/*.eml
-	fi
+	for sub in "$dir"*/; do
+		[ -d "$sub" ] || continue
+		save "$account" "$(basename "$sub")" "$sub"*.eml
+	done
 done
 
 save hostile@example.test INBOX ../../testdata/hostile/*.eml

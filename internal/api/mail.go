@@ -41,6 +41,10 @@ func (a *apiHandler) answerMailError(w http.ResponseWriter, r *http.Request, s *
 		writeError(w, http.StatusUnauthorized, errPasswordChanged)
 	case errors.Is(err, mail.ErrNotFound) || mail.IsMissingFolder(err):
 		writeError(w, http.StatusNotFound, errNotFound)
+	case errors.Is(err, mail.ErrFolderExists):
+		writeError(w, http.StatusConflict, errFolderExists)
+	case errors.Is(err, mail.ErrSpecialFolder), errors.Is(err, mail.ErrIntoItself), errors.Is(err, mail.ErrNotTrash):
+		writeError(w, http.StatusBadRequest, errBadRequest)
 	case errors.Is(err, mail.ErrUnreachable):
 		log.Printf("%s %s: %v", r.Method, r.URL.Path, err)
 		writeError(w, http.StatusServiceUnavailable, errUnreachable)
@@ -61,9 +65,16 @@ func (a *apiHandler) folders(w http.ResponseWriter, r *http.Request, s *session.
 		folders, err = c.Folders()
 		return err
 	})
-	if ok {
-		writeJSON(w, http.StatusOK, map[string]any{"folders": folders})
+	if !ok {
+		return
 	}
+	var order []string
+	if err := a.Store.Setting(r.Context(), s.Account, folderOrderKey, &order); err != nil {
+		internalError(w, r, err)
+		return
+	}
+	mail.SortFolders(folders, order)
+	writeJSON(w, http.StatusOK, map[string]any{"folders": folders})
 }
 
 // conversations answers GET /api/conversations?folder=<name>[&cursor=<uid>&shown=<n>], where

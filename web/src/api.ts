@@ -8,6 +8,7 @@ const knownErrors = [
   'password_changed',
   'no_folder',
   'not_found',
+  'folder_exists',
   'internal',
 ] as const;
 export type ErrorCode = (typeof knownErrors)[number];
@@ -159,4 +160,46 @@ export function withImages(body: string): string {
   const url = new URL(body, location.origin);
   url.searchParams.set('images', '1');
   return url.pathname + url.search;
+}
+
+export interface Moved {
+  folder: string;
+  uids: number[];
+}
+
+export type Destination = { role: 'inbox' | 'archive' | 'trash' | 'junk' } | { to: string };
+
+/** Moves messages and says where they went, with their new UIDs for an undo. */
+export function move(folder: string, uids: number[], dest: Destination): Promise<Result<Moved>> {
+  return call('POST', '/api/move', { folder, uids, ...dest });
+}
+
+/** Deletes messages for good. */
+export function expunge(folder: string, uids: number[]): Promise<Result<void>> {
+  return call('POST', '/api/expunge', { folder, uids });
+}
+
+export function setFlag(folder: string, uids: number[], flag: 'seen' | 'flagged', on: boolean): Promise<Result<void>> {
+  return call('POST', '/api/flags', { folder, uids, flag, on });
+}
+
+export function createFolder(parent: string, label: string): Promise<Result<{ name: string }>> {
+  return call('POST', '/api/folders', { parent, label });
+}
+
+/** Gives a folder a new label or a new parent ("" for the top level). */
+export function renameFolder(
+  folder: string,
+  parent: string,
+  label: string,
+): Promise<Result<{ name: string; delimiter: string }>> {
+  return call('POST', '/api/folders/rename', { folder, parent, label });
+}
+
+export function deleteFolder(folder: string): Promise<Result<void>> {
+  return call('POST', '/api/folders/delete', { folder });
+}
+
+export function saveFolderOrder(order: string[]): Promise<Result<void>> {
+  return call('PUT', '/api/folder-order', { order });
 }
