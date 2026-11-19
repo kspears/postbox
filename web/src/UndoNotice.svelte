@@ -14,15 +14,48 @@
   }
   const { notice, onDone }: Props = $props();
 
-  // Ten seconds, then the notice and its undo are gone (spec: no undo after that).
+  // Ten seconds, then the notice and its undo are gone (spec: no undo after that). The clock
+  // stops while the pointer or the keyboard focus is on the notice, so reaching for Undo is
+  // never a race.
+  const shown = 10_000;
+  let left = shown;
+  let since = 0;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  function run(): void {
+    since = Date.now();
+    timer = setTimeout(onDone, left);
+  }
+
+  function pause(): void {
+    if (timer === undefined) return;
+    clearTimeout(timer);
+    timer = undefined;
+    left -= Date.now() - since;
+  }
+
+  function resume(): void {
+    if (timer === undefined) run();
+  }
+
   $effect(() => {
     void notice;
-    const timer = setTimeout(onDone, 10_000);
+    left = shown;
+    clearTimeout(timer);
+    timer = undefined;
+    run();
     return () => clearTimeout(timer);
   });
 </script>
 
-<div class="notice" role="status">
+<div
+  class="notice"
+  role="status"
+  onpointerenter={pause}
+  onpointerleave={resume}
+  onfocusin={pause}
+  onfocusout={resume}
+>
   <span>{notice.text}</span>
   {#if notice.undo}
     <button

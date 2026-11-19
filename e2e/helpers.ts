@@ -105,26 +105,16 @@ export async function deliver(to: string, subject: string, body: string): Promis
 
 /** The flags of the message with subject in account's Inbox, as another IMAP client sees them. */
 export async function imapFlags(account: string, subject: string): Promise<string> {
-  const tls = await import('node:tls');
-  const fs = await import('node:fs');
-  const socket = tls.connect({ host: 'dovecot', port: 993, servername: 'dovecot', ca: fs.readFileSync('/ca/ca.crt') });
-  const quoted = (s: string) => `"${s.replace(/["\\]/g, '\\$&')}"`;
-  const transcript = await converse(socket, [
-    [null, /^\* OK/m],
-    [`a LOGIN ${quoted(account)} ${quoted(seedPassword())}`, /^a OK/m],
-    ['b EXAMINE INBOX', /^b OK/m],
-    [`c SEARCH SUBJECT ${quoted(subject)}`, /^c OK/m],
-  ]);
-  const ids = /^\* SEARCH ([\d ]+)/m.exec(transcript)?.[1]?.trim();
-  if (!ids) throw new Error(`no message "${subject}" in ${account}'s Inbox`);
-  const again = tls.connect({ host: 'dovecot', port: 993, servername: 'dovecot', ca: fs.readFileSync('/ca/ca.crt') });
-  const flags = await converse(again, [
-    [null, /^\* OK/m],
-    [`a LOGIN ${quoted(account)} ${quoted(seedPassword())}`, /^a OK/m],
-    ['b EXAMINE INBOX', /^b OK/m],
-    [`c FETCH ${ids.split(' ')[0]} FLAGS`, /^c OK/m],
-  ]);
+  const found = await imap(account, ['EXAMINE INBOX', `SEARCH SUBJECT ${quoted(subject)}`]);
+  const id = /^\* SEARCH (\d+)/m.exec(found)?.[1];
+  if (!id) throw new Error(`no message "${subject}" in ${account}'s Inbox`);
+  const flags = await imap(account, ['EXAMINE INBOX', `FETCH ${id} FLAGS`]);
   return /FLAGS \(([^)]*)\)/.exec(flags)?.[1] ?? '';
+}
+
+/** s as an IMAP quoted string. */
+function quoted(s: string): string {
+  return `"${s.replace(/["\\]/g, '\\$&')}"`;
 }
 
 /** Runs commands as another IMAP client would, logged in as account, and returns everything the
@@ -133,7 +123,6 @@ export async function imap(account: string, commands: string[]): Promise<string>
   const tls = await import('node:tls');
   const fs = await import('node:fs');
   const socket = tls.connect({ host: 'dovecot', port: 993, servername: 'dovecot', ca: fs.readFileSync('/ca/ca.crt') });
-  const quoted = (s: string) => `"${s.replace(/["\\]/g, '\\$&')}"`;
   const all = [`LOGIN ${quoted(account)} ${quoted(seedPassword())}`, ...commands];
   return converse(socket, [
     [null, /^\* OK/m],
@@ -143,8 +132,7 @@ export async function imap(account: string, commands: string[]): Promise<string>
 
 /** The subjects of the messages in one of account's folders; null when the folder does not exist. */
 export async function subjectsIn(account: string, folder: string): Promise<string[] | null> {
-  const quoted = `"${folder.replace(/["\\]/g, '\\$&')}"`;
-  const out = await imap(account, [`EXAMINE ${quoted}`, 'FETCH 1:* (BODY.PEEK[HEADER.FIELDS (SUBJECT)])']);
+  const out = await imap(account, [`EXAMINE ${quoted(folder)}`, 'FETCH 1:* (BODY.PEEK[HEADER.FIELDS (SUBJECT)])']);
   if (/^t1 NO/m.test(out)) return null;
   return [...out.matchAll(/^Subject: (.*)$/gim)].map((m) => m[1]!.trim());
 }

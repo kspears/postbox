@@ -591,6 +591,8 @@ performance panel, median of five tries.
 | Folder order | Stored in Postbox; not visible to other clients | IMAP has no folder order | agent default |
 | Folder names typed in Postbox | No `/`, `.`, `\`, `%`, `*`, `"` or control characters | Servers use them to separate or match folder names | agent default |
 | Undo notice wording | "Conversation archived.", "Conversation moved to Trash.", "Conversation reported as spam.", "Conversation moved to Inbox.", "Conversation moved to <folder>." ("<n> conversations …" for several) | The spec named only the "Undo" action | agent default |
+| Undo notice timing | Ten seconds, paused while the pointer or keyboard focus is on it | Reaching for "Undo" must not be a race (WCAG 2.2.1) | agent default |
+| Permanent delete | Only in the Trash folder, checked by the server | A request for it anywhere else is refused, so a mistake cannot wipe Inbox | agent default |
 | "Move to…" action | In v1 | Dragging is not possible at phone width | agent default |
 | Flags | Read/unread and one flag | Coloured flags deferred | user |
 | One mail server per deployment | Yes; no server field | Simpler login | user |

@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"slices"
 	"strings"
@@ -124,38 +125,47 @@ func (a *apiHandler) renameFolder(w http.ResponseWriter, r *http.Request, s *ses
 		Parent string `json:"parent"`
 		Label  string `json:"label"`
 	}
-	if !decode(w, r, &req) || req.Folder == "" || !validLabel(req.Label) {
+	if !decode(w, r, &req) {
+		return
+	}
+	// A folder moved under a new parent keeps the label it has, even one another mail app gave
+	// it that Postbox would not accept typed.
+	keeping := req.Label != "" && strings.HasSuffix(req.Folder, req.Label)
+	if req.Folder == "" || (!keeping && !validLabel(req.Label)) {
 		writeError(w, http.StatusBadRequest, errBadRequest)
 		return
 	}
-	var name string
+	var renamed mail.Renamed
 	if !a.withMail(w, r, s, func(c *mail.Conn) (err error) {
-		name, err = c.RenameFolder(req.Folder, req.Parent, req.Label)
+		renamed, err = c.RenameFolder(req.Folder, req.Parent, req.Label)
 		return err
 	}) {
 		return
 	}
 	// The stored order names folders; keep it pointing at the renamed folder and its children.
-	a.renameInOrder(r, s, req.Folder, name)
-	writeJSON(w, http.StatusOK, map[string]string{"name": name})
+	a.updateOrder(r, s, func(order []string) []string { return renameInOrder(order, req.Folder, renamed.Name, renamed.Delim) })
+	writeJSON(w, http.StatusOK, map[string]string{"name": renamed.Name, "delimiter": renamed.Delim})
 }
 
-func (a *apiHandler) renameInOrder(r *http.Request, s *session.Session, from, to string) {
+// updateOrder applies change to the account's stored folder order, if it has one. The order is
+// a convenience: failing to keep it in step is logged, not reported.
+func (a *apiHandler) updateOrder(r *http.Request, s *session.Session, change func([]string) []string) {
 	var order []string
-	if a.Store.Setting(r.Context(), s.Account, folderOrderKey, &order) != nil || len(order) == 0 {
+	if err := a.Store.Setting(r.Context(), s.Account, folderOrderKey, &order); err != nil || len(order) == 0 {
 		return
 	}
+	if err := a.Store.SetSetting(r.Context(), s.Account, folderOrderKey, change(order)); err != nil {
+		log.Printf("folder order: %v", err)
+	}
+}
+
+func renameInOrder(order []string, from, to, delim string) []string {
 	for i, name := range order {
-		switch {
-		case name == from:
-			order[i] = to
-		case strings.HasPrefix(name, from) && len(name) > len(from) && strings.ContainsRune("/.", rune(name[len(from)])):
-			// A child: the character after the prefix is the delimiter, which labels may not
-			// contain (validLabel).
-			order[i] = to + name[len(from):]
+		if mail.Within(name, from, delim) {
+			order[i] = to + strings.TrimPrefix(name, from)
 		}
 	}
-	a.Store.SetSetting(r.Context(), s.Account, folderOrderKey, order)
+	return order
 }
 
 // deleteFolder answers POST /api/folders/delete {"folder"}: the folder and its subfolders go, with
@@ -168,9 +178,18 @@ func (a *apiHandler) deleteFolder(w http.ResponseWriter, r *http.Request, s *ses
 		writeError(w, http.StatusBadRequest, errBadRequest)
 		return
 	}
-	if a.withMail(w, r, s, func(c *mail.Conn) error { return c.DeleteFolder(req.Folder) }) {
-		w.WriteHeader(http.StatusNoContent)
+	var delim string
+	if !a.withMail(w, r, s, func(c *mail.Conn) (err error) {
+		delim, err = c.DeleteFolder(req.Folder)
+		return err
+	}) {
+		return
 	}
+	// Forget the deleted folders' places, so a new folder of the same name starts afresh.
+	a.updateOrder(r, s, func(order []string) []string {
+		return slices.DeleteFunc(order, func(name string) bool { return mail.Within(name, req.Folder, delim) })
+	})
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // folderOrder answers PUT /api/folder-order {"order": [full names]}: the arrangement the person

@@ -15,9 +15,10 @@
     type Destination,
     type ErrorCode,
     type Folder,
+    type Message,
   } from './api';
   import { untrack } from 'svelte';
-  import { SvelteSet } from 'svelte/reactivity';
+  import { SvelteMap, SvelteSet } from 'svelte/reactivity';
   import ActionBar, { type Action } from './ActionBar.svelte';
   import ConversationList from './ConversationList.svelte';
   import ConversationView from './ConversationView.svelte';
@@ -57,20 +58,24 @@
   // Bumped whenever the open folder changes, so answers for the old one are dropped.
   let generation = 0;
 
+  // Read and flag changes made here, kept until a list refresh that began after the server had
+  // them, so an older answer cannot undo them on screen.
+  const pendingFlags = new SvelteMap<number, { patch: Partial<Conversation>; done?: number }>();
+  // The open conversation's messages, as its view loaded them, with which conversation they are.
+  let openLoaded = $state<{ folder: string; id: number; messages: Message[] } | null>(null);
   // Conversations moved away by an action here. They stay hidden even if a refresh that started
   // before the move brings them back.
   const hidden = new SvelteSet<number>();
   const shownRows = $derived(rows.filter((r) => !hidden.has(r.id)));
   // Ticked conversations, for actions and drags.
   let checked = $state<number[]>([]);
-  // The conversations a drag carries, until it is dropped.
-  let dragged: number[] = [];
   let notice = $state<Notice | null>(null);
   // An action waiting on the person: a folder to move to, or a confirmation.
   let asking = $state<
     | { kind: 'moveTo'; ids: number[] }
-    | { kind: 'expunge'; ids: number[] }
+    | { kind: 'expunge'; ids: number[]; uids: number[] }
     | { kind: 'deleteFolder'; folder: Folder; text: string }
+    | { kind: 'moveFolder'; folder: Folder }
     | null
   >(null);
 
@@ -78,6 +83,28 @@
   // went), the conversation is fetched again.
   const openRow = $derived(rows.find((r) => r.id === route.conversation));
   const openRowState = $derived(openRow ? `${openRow.date} ${openRow.count}` : '');
+  // What actions on the open conversation act on: its messages in this folder.
+  const openConversationRow = $derived.by((): Conversation | undefined => {
+    const id = route.conversation;
+    // Only messages loaded for this very conversation count: acting on another's would move the
+    // wrong mail.
+    if (!id || openLoaded?.id !== id || openLoaded.folder !== route.folder) return openRow;
+    const mine = openLoaded.messages.filter((m) => m.folder === route.folder);
+    if (mine.length === 0) return openRow;
+    const latest = mine.at(-1)!;
+    return {
+      id,
+      uids: mine.map((m) => m.uid),
+      subject: mine[0]!.subject,
+      participants: mine.flatMap((m) => m.from),
+      snippet: openRow?.snippet ?? '',
+      date: latest.date,
+      count: mine.length,
+      unread: mine.some((m) => m.unread),
+      flagged: mine.some((m) => m.flagged),
+      attachments: mine.some((m) => m.attachments.length > 0),
+    };
+  });
   const currentFolder = $derived(folderList.find((f) => f.name === route.folder));
 
   // Deals with a failed load and returns what to show for it, if anything.
@@ -94,14 +121,27 @@
   let foldersInFlight = false;
   let foldersAt = 0;
 
-  async function loadFolders(force = false): Promise<void> {
-    if (foldersInFlight || (!force && Date.now() - foldersAt < 10_000)) return;
+  // A forced refresh asked for while one is in flight runs once that one ends, and the caller
+  // waits for it: an answer that left before a change must not stand for the state after it.
+  let foldersRunning: Promise<void> = Promise.resolve();
+  let foldersAgain = false;
+
+  function loadFolders(force = false): Promise<void> {
+    if (foldersInFlight) {
+      if (force) foldersAgain = true;
+      return foldersRunning.then(() => (foldersAgain ? loadFolders(true) : undefined));
+    }
+    if (!force && Date.now() - foldersAt < 10_000) return Promise.resolve();
     foldersInFlight = true;
-    const result = await fetchFolders();
-    foldersInFlight = false;
-    foldersAt = Date.now();
-    foldersFailure = result.ok ? null : handle(result.error);
-    if (result.ok) folderList = result.value;
+    foldersAgain = false;
+    foldersRunning = (async () => {
+      const result = await fetchFolders();
+      foldersInFlight = false;
+      foldersAt = Date.now();
+      foldersFailure = result.ok ? null : handle(result.error);
+      if (result.ok) folderList = result.value;
+    })();
+    return foldersRunning;
   }
 
   async function loadPage(first: boolean): Promise<void> {
@@ -126,6 +166,7 @@
   async function refreshList(): Promise<void> {
     if (loading || !listLoaded) return;
     const mine = generation;
+    const started = Date.now();
     const result = await fetchConversations(route.folder);
     if (mine !== generation || !result.ok) return;
     const page = result.value.conversations;
@@ -133,11 +174,20 @@
     if (result.value.next === undefined || !last) {
       rows = page;
       next = undefined;
-      return;
+    } else {
+      const ids = new Set(page.map((c) => c.id));
+      rows = [...page, ...rows.filter((r) => !ids.has(r.id) && r.date < last.date)];
+      next ??= result.value.next;
     }
-    const ids = new Set(page.map((c) => c.id));
-    rows = [...page, ...rows.filter((r) => !ids.has(r.id) && r.date < last.date)];
-    next ??= result.value.next;
+    // A flag or read change made here outlives a refresh that set off before the server had it.
+    for (const [id, change] of pendingFlags) {
+      if (change.done && change.done < started) {
+        pendingFlags.delete(id);
+        continue;
+      }
+      const row = rows.find((r) => r.id === id);
+      if (row) Object.assign(row, change.patch);
+    }
   }
 
   function markedRead(id: number): void {
@@ -223,8 +273,13 @@
     loadFolders(true);
   }
 
+  // The rows for ids. The open conversation is taken from its own messages, which are fresher
+  // than its row (a reply may have come since the list was loaded) and are there even when its
+  // row is not loaded (opened from a link).
   function rowsOf(ids: number[]): Conversation[] {
-    return rows.filter((r) => ids.includes(r.id));
+    const out = rows.filter((r) => ids.includes(r.id) && r.id !== openConversationRow?.id);
+    if (openConversationRow && ids.includes(openConversationRow.id)) out.push(openConversationRow);
+    return out;
   }
 
   // Moves conversations away at once (the list changes before the server answers), then tells
@@ -261,11 +316,28 @@
     if (targets.length === 0) return;
     // Flagging marks the latest message; unflagging and read state cover every message.
     const uids = flag === 'flagged' && on ? targets.map((r) => r.uids.at(-1)!) : targets.flatMap((r) => r.uids);
+    const patch: Partial<Conversation> = flag === 'seen' ? { unread: !on } : { flagged: on };
     for (const r of targets) {
-      if (flag === 'seen') r.unread = !on;
-      else r.flagged = on;
+      // r may stand in for the open conversation; its row, if loaded, changes too.
+      Object.assign(r, patch);
+      const row = rows.find((row) => row.id === r.id);
+      if (row) Object.assign(row, patch);
+      pendingFlags.set(r.id, { patch });
     }
     const result = await setFlag(route.folder, uids, flag, on);
+    // The open conversation shows the change without fetching it again.
+    if (openLoaded && targets.some((r) => r.id === openLoaded?.id)) {
+      const changed = new Set(uids);
+      for (const m of openLoaded.messages) {
+        if (m.folder !== route.folder || !changed.has(m.uid)) continue;
+        if (flag === 'seen') m.unread = !on;
+        else m.flagged = on;
+      }
+    }
+    for (const r of targets) {
+      const change = pendingFlags.get(r.id);
+      if (change?.patch === patch) change.done = Date.now();
+    }
     if (!result.ok) return failed(result.error);
     if (flag === 'seen') loadFolders(true);
   }
@@ -277,7 +349,8 @@
         return void moveAway(ids, { role: 'archive' }, strings.actions.archived);
       case 'delete':
         if (role === 'trash') {
-          asking = { kind: 'expunge', ids };
+          // The messages are fixed now, so what the person confirms is what goes.
+          asking = { kind: 'expunge', ids, uids: rowsOf(ids).flatMap((r) => r.uids) };
           return;
         }
         return void moveAway(ids, { role: 'trash' }, strings.actions.trashed);
@@ -302,13 +375,13 @@
     void moveAway(ids, { to: folder.name }, (n) => strings.actions.moved(n, folder.label));
   }
 
-  async function expungeNow(ids: number[]): Promise<void> {
+  async function expungeNow(ids: number[], uids: number[]): Promise<void> {
     asking = null;
     const targets = rowsOf(ids);
     for (const r of targets) hidden.add(r.id);
     checked = checked.filter((id) => !ids.includes(id));
     if (route.conversation && ids.includes(route.conversation)) closeConversation();
-    const result = await expunge(route.folder, targets.flatMap((r) => r.uids));
+    const result = await expunge(route.folder, uids);
     if (!result.ok) {
       for (const r of targets) hidden.delete(r.id);
       return failed(result.error);
@@ -327,11 +400,29 @@
     return null;
   }
 
-  async function rename(folder: Folder, label: string): Promise<ErrorCode | null> {
-    const result = await renameFolder(folder.name, folder.parent ?? '', label);
-    if (!result.ok) return result.error;
-    if (route.folder === folder.name) openFolder(result.value.name);
+  // Renames or reparents a folder, keeps an open folder at or under it open under its new name,
+  // and reloads the folders. Returns the new name, or the error.
+  async function renameTo(folder: Folder, parent: string, label: string): Promise<{ name: string } | { error: ErrorCode }> {
+    const result = await renameFolder(folder.name, parent, label);
+    if (!result.ok) return { error: result.error };
+    const { name, delimiter } = result.value;
+    const at = route.folder;
+    if (at === folder.name || at.startsWith(folder.name + delimiter)) openFolder(name + at.slice(folder.name.length));
     await loadFolders(true);
+    return { name };
+  }
+
+  async function rename(folder: Folder, label: string): Promise<ErrorCode | null> {
+    const result = await renameTo(folder, folder.parent ?? '', label);
+    return 'error' in result ? result.error : null;
+  }
+
+  // A new parent, from "Move folder…" or a drag: a failure shows as a notice.
+  async function reparent(folder: Folder, parent: string): Promise<string | null> {
+    asking = null;
+    const result = await renameTo(folder, parent, folder.label);
+    if (!('error' in result)) return result.name;
+    notice = { text: result.error === 'folder_exists' ? strings.folders.exists(folder.label) : strings.actions.failed };
     return null;
   }
 
@@ -369,14 +460,9 @@
     let name = folder.name;
     const parent = zone === 'into' ? target.name : (target.parent ?? '');
     if (parent !== (folder.parent ?? '')) {
-      const result = await renameFolder(folder.name, parent, folder.label);
-      if (!result.ok) {
-        notice = { text: result.error === 'folder_exists' ? strings.folders.exists(folder.label) : strings.actions.failed };
-        return;
-      }
-      name = result.value.name;
-      if (route.folder === folder.name) openFolder(name);
-      await loadFolders(true);
+      const renamed = await reparent(folder, parent);
+      if (!renamed) return;
+      name = renamed;
     }
     if (zone === 'into') return;
 
@@ -452,11 +538,12 @@
         showFolders = false;
         openFolder(name);
       }}
-      onDropConversations={(name) => {
+      onDropConversations={(name, from, ids) => {
         const target = folderList.find((f) => f.name === name);
-        if (target) moveTo(dragged, target);
-        dragged = [];
+        // Only a drag from the list on screen: another tab's rows are not these.
+        if (target && from === route.folder) moveTo(ids, target);
       }}
+      onPickParent={(folder) => (asking = { kind: 'moveFolder', folder })}
       onCreate={create}
       onRename={rename}
       onDelete={askDelete}
@@ -494,7 +581,6 @@
           selected={route.conversation}
           {checked}
           onCheck={(ids) => (checked = ids)}
-          onDrag={(ids) => (dragged = ids)}
           onMore={() => loadPage(false)}
           onOpen={openConversation}
         />
@@ -510,13 +596,15 @@
         onRead={markedRead}
         onError={(e) => (listFailure = handle(e))}
         refresh={openRowState}
+        onLoaded={(folder, id, messages) => (openLoaded = { folder, id, messages })}
       >
-        {#if openRow}
+        {#if openConversationRow}
+          {@const target = openConversationRow}
           <ActionBar
             role={currentFolder?.role}
-            unread={openRow.unread}
-            flagged={openRow.flagged}
-            onAction={(a) => openRow && act(a, [openRow.id])}
+            unread={target.unread}
+            flagged={target.flagged}
+            onAction={(a) => act(a, [target.id])}
           />
         {/if}
       </ConversationView>
@@ -528,6 +616,17 @@
   </div>
 </div>
 
+{#snippet picker(choices: Folder[], pick: (f: Folder) => void)}
+  <ul class="picker">
+    {#each choices as f (f.name)}
+      <li><button type="button" onclick={() => pick(f)}>{f.parent ? `${f.parent} / ${f.label}` : f.label}</button></li>
+    {/each}
+  </ul>
+  <div class="buttons">
+    <button type="button" onclick={() => (asking = null)}>{strings.actions.cancel}</button>
+  </div>
+{/snippet}
+
 {#if notice}
   <UndoNotice {notice} onDone={() => (notice = null)} />
 {/if}
@@ -536,23 +635,32 @@
   {@const ids = asking.ids}
   <Dialog label={strings.actions.moveHeading} onClose={() => (asking = null)}>
     <h2 class="dialog-title">{strings.actions.moveHeading}</h2>
-    <ul class="picker">
-      {#each folderList.filter((f) => f.selectable && f.name !== route.folder) as f (f.name)}
-        <li><button type="button" onclick={() => moveTo(ids, f)}>{f.parent ? `${f.parent} / ${f.label}` : f.label}</button></li>
-      {/each}
-    </ul>
-    <div class="buttons">
-      <button type="button" onclick={() => (asking = null)}>{strings.actions.cancel}</button>
-    </div>
+    {@render picker(
+      folderList.filter((f) => f.selectable && f.name !== route.folder),
+      (f) => moveTo(ids, f),
+    )}
   </Dialog>
 {:else if asking?.kind === 'expunge'}
-  {@const ids = asking.ids}
+  {@const { ids, uids } = asking}
   <Dialog label={strings.actions.deleteForever} onClose={() => (asking = null)}>
     <p>{strings.actions.deleteForever}</p>
     <div class="buttons">
       <button type="button" onclick={() => (asking = null)}>{strings.actions.cancel}</button>
-      <button type="button" class="danger" onclick={() => expungeNow(ids)}>{strings.actions.confirmDelete}</button>
+      <button type="button" class="danger" onclick={() => expungeNow(ids, uids)}>{strings.actions.confirmDelete}</button>
     </div>
+  </Dialog>
+{:else if asking?.kind === 'moveFolder'}
+  {@const folder = asking.folder}
+  <Dialog label={strings.folders.moveFolderHeading(folder.label)} onClose={() => (asking = null)}>
+    <h2 class="dialog-title">{strings.folders.moveFolderHeading(folder.label)}</h2>
+    {@const under = new Set(descendants(folder))}
+    {#if folder.parent}
+      <button type="button" class="top-level" onclick={() => reparent(folder, '')}>{strings.folders.topLevel}</button>
+    {/if}
+    {@render picker(
+      folderList.filter((f) => f.name !== folder.name && f.name !== folder.parent && !under.has(f)),
+      (f) => reparent(folder, f.name),
+    )}
   </Dialog>
 {:else if asking?.kind === 'deleteFolder'}
   {@const folder = asking.folder}
@@ -699,7 +807,8 @@
     overflow-y: auto;
   }
 
-  .picker button {
+  .picker button,
+  .top-level {
     width: 100%;
     text-align: left;
     border: none;
@@ -710,7 +819,8 @@
     cursor: pointer;
   }
 
-  .picker button:hover {
+  .picker button:hover,
+  .top-level:hover {
     background: var(--hover);
   }
 

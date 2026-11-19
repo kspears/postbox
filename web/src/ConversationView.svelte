@@ -13,10 +13,12 @@
     onError: (error: ErrorCode) => void;
     // Changes when the conversation's row in the list changes, so it is fetched again.
     refresh: string;
+    // Told the messages each time they load, so actions act on what is shown.
+    onLoaded: (folder: string, id: number, messages: Message[]) => void;
     // The actions for this conversation.
     children?: Snippet;
   }
-  const { account, folder, id, onBack, onRead, onError, refresh, children }: Props = $props();
+  const { account, folder, id, onBack, onRead, onError, refresh, onLoaded, children }: Props = $props();
 
   let messages = $state<Message[]>([]);
   let gone = $state(false);
@@ -44,6 +46,7 @@
         return;
       }
       messages = result.value;
+      onLoaded(want.folder, want.id, messages);
       // Shown means read: mark this folder's unread messages of the conversation.
       const unread = messages.filter((m) => m.unread && m.folder === want.folder).map((m) => m.uid);
       if (unread.length === 0) return;

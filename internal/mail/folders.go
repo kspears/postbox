@@ -75,11 +75,11 @@ func (c *Conn) Folders() ([]Folder, error) {
 // SentFolder returns the name of the folder that holds sent mail, or "" when there is none
 // yet. It asks only for names and special-use marks, not for every folder's counts.
 func (c *Conn) SentFolder() (string, error) {
-	data, err := c.List("", "*", &imap.ListOptions{ReturnSpecialUse: true}).Collect()
+	folders, _, err := c.folderTree()
 	if err != nil {
 		return "", err
 	}
-	for _, f := range buildFolders(data) {
+	for _, f := range folders {
 		if f.Role == RoleSent {
 			return f.Name, nil
 		}

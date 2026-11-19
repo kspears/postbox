@@ -14,18 +14,21 @@
     // The conversations ticked for an action or a drag.
     checked: number[];
     onCheck: (ids: number[]) => void;
-    // A drag started; dropping on a folder moves these conversations.
-    onDrag: (ids: number[]) => void;
     onMore: () => void;
     onOpen: (id: number) => void;
   }
-  const { account, conversations, loading, hasMore, folder, selected, checked, onCheck, onDrag, onMore, onOpen }: Props =
+  const { account, conversations, loading, hasMore, folder, selected, checked, onCheck, onMore, onOpen }: Props =
     $props();
 
   // A real link, so a middle click or "open in new tab" works; a plain click opens it here.
   // While anything is ticked (on a phone, after a long press), a tap ticks instead.
   function open(event: MouseEvent, id: number): void {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.altKey) return;
+    // The click a browser sends after a long press: the press has ticked the row already.
+    if (Date.now() - longPressAt < 800) {
+      event.preventDefault();
+      return;
+    }
     if (event.shiftKey || (checked.length > 0 && touch)) {
       event.preventDefault();
       tick(id, event.shiftKey);
@@ -54,31 +57,24 @@
   // At phone width a long press starts selection.
   let touch = false;
   let pressTimer: ReturnType<typeof setTimeout> | undefined;
-  let pressed = false;
+  let longPressAt = 0;
 
   function pressStart(event: PointerEvent, id: number): void {
     touch = event.pointerType === 'touch';
     if (!touch) return;
-    pressed = false;
     pressTimer = setTimeout(() => {
-      pressed = true;
+      longPressAt = Date.now();
       tick(id, false);
     }, 500);
   }
 
-  function pressEnd(event: Event): void {
+  function pressEnd(): void {
     clearTimeout(pressTimer);
-    if (pressed) {
-      // The long press ticked the row; the click that follows must not open it.
-      event.preventDefault();
-      pressed = false;
-    }
   }
 
   function dragStart(event: DragEvent, id: number): void {
     if (!event.dataTransfer) return;
     const ids = checked.includes(id) ? checked : [id];
-    onDrag(ids);
     event.dataTransfer.effectAllowed = 'move';
     event.dataTransfer.setData(conversationType, JSON.stringify({ folder, ids }));
   }
@@ -137,7 +133,12 @@
           class="check"
           aria-label={strings.actions.select(c.subject || strings.list.noSubject)}
           checked={checked.includes(c.id)}
-          onclick={(e) => tick(c.id, e.shiftKey)}
+          onclick={(e) => {
+            tick(c.id, e.shiftKey);
+            // A range only ever ticks. The browser untoggled a box that was ticked already, and
+            // the state did not change, so nothing else would put the tick back.
+            if (e.shiftKey) e.currentTarget.checked = true;
+          }}
         />
         <a
           class="row"
@@ -147,7 +148,7 @@
           onpointerdown={(e) => pressStart(e, c.id)}
           onpointerup={pressEnd}
           onpointercancel={pressEnd}
-          onpointerleave={() => clearTimeout(pressTimer)}
+          onpointerleave={pressEnd}
           oncontextmenu={(e) => touch && e.preventDefault()}
           draggable="false"
         >

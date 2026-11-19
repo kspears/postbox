@@ -45,6 +45,16 @@ test('criterion 15: Archive, Delete and Report spam move the conversation, and U
     await expect(row(page, subject)).toHaveCount(1);
   }
 
+  // Inside Junk the action is "Not spam", which moves it to Inbox.
+  await openConversation(page, 'Spam me');
+  await readingAction(page, 'Report spam').click();
+  await expect.poll(() => subjectsIn(organiser, 'Junk')).toContain('Spam me');
+  await folderButton(page, 'Junk').click();
+  await openConversation(page, 'Spam me');
+  await readingAction(page, 'Not spam').click();
+  await expect.poll(() => subjectsIn(organiser, 'INBOX')).toContain('Spam me');
+  await folderButton(page, 'Inbox').click();
+
   // Archiving a conversation leaves the reply in Sent where it is.
   await openConversation(page, 'Archive me');
   await readingAction(page, 'Archive').click();
@@ -89,6 +99,23 @@ test('criterion 17: two selected conversations dragged to a folder, Move to…, 
   const target = page.getByRole('navigation', { name: 'Folders' }).getByRole('listitem').filter({ hasText: /^Projects/ });
   await page.getByRole('navigation', { name: 'Folders' }).getByRole('listitem').filter({ hasText: /^Old/ }).dragTo(target);
   await expect.poll(() => foldersOf(organiser)).toContain('Projects/Old');
+
+  // The same without dragging: "Move folder…" from the folder's menu.
+  await imap(organiser, ['CREATE "Loose"']);
+  await page.reload();
+  const nav = page.getByRole('navigation', { name: 'Folders' });
+  await nav.getByRole('button', { name: 'Actions for Loose' }).click();
+  await nav.getByRole('menuitem', { name: 'Move folder…' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Receipts', exact: true }).click();
+  await expect.poll(() => foldersOf(organiser)).toContain('Receipts/Loose');
+});
+
+test('permanent delete is refused outside Trash', async ({ page, baseURL }) => {
+  const response = await page.request.post('/api/expunge', {
+    headers: { Origin: baseURL! },
+    data: { folder: 'INBOX', uids: [1] },
+  });
+  expect(response.status()).toBe(400);
 });
 
 test('criterion 18: folders are created, renamed, deleted and reordered from the folder pane', async ({ page }) => {
@@ -112,6 +139,7 @@ test('criterion 18: folders are created, renamed, deleted and reordered from the
   await nav.getByRole('textbox', { name: 'Folder name' }).press('Enter');
   await expect(folderButton(page, 'Travel')).toBeVisible();
   await expect.poll(() => foldersOf(organiser)).toContain('Travel');
+  expect(await foldersOf(organiser)).not.toContain('Trips');
 
   await nav.getByRole('button', { name: 'Actions for Travel' }).click();
   await nav.getByRole('menuitem', { name: 'New subfolder' }).click();

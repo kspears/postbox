@@ -188,7 +188,11 @@ export function createFolder(parent: string, label: string): Promise<Result<{ na
 }
 
 /** Gives a folder a new label or a new parent ("" for the top level). */
-export function renameFolder(folder: string, parent: string, label: string): Promise<Result<{ name: string }>> {
+export function renameFolder(
+  folder: string,
+  parent: string,
+  label: string,
+): Promise<Result<{ name: string; delimiter: string }>> {
   return call('POST', '/api/folders/rename', { folder, parent, label });
 }
 

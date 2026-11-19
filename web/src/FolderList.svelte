@@ -14,15 +14,17 @@
     folders: Folder[];
     current: string;
     onOpen: (name: string) => void;
-    // Conversations dropped on a folder.
-    onDropConversations: (folder: string) => void;
+    // Conversations dropped on a folder: those the drag carries, from the folder it came from.
+    onDropConversations: (target: string, from: string, ids: number[]) => void;
     onCreate: (parent: string, label: string) => Promise<ErrorCode | null>;
     onRename: (folder: Folder, label: string) => Promise<ErrorCode | null>;
     onDelete: (folder: Folder) => void;
     // A folder dropped into another (nest) or beside one (reorder).
     onMoveFolder: (folder: Folder, target: Folder, zone: Zone) => void;
+    // "Move folder…": choose a new parent without dragging.
+    onPickParent: (folder: Folder) => void;
   }
-  const { folders, current, onOpen, onDropConversations, onCreate, onRename, onDelete, onMoveFolder }: Props =
+  const { folders, current, onOpen, onDropConversations, onCreate, onRename, onDelete, onMoveFolder, onPickParent }: Props =
     $props();
 
   const byName = $derived(new Map(folders.map((f) => [f.name, f])));
@@ -125,7 +127,12 @@
     if (!zone) return;
     event.preventDefault();
     if (event.dataTransfer?.types.includes(conversationType)) {
-      onDropConversations(target.name);
+      try {
+        const carried = JSON.parse(event.dataTransfer.getData(conversationType)) as { folder: string; ids: number[] };
+        onDropConversations(target.name, carried.folder, carried.ids);
+      } catch {
+        // Not a drag this app made.
+      }
       return;
     }
     if (dragFolder) onMoveFolder(dragFolder, target, zone);
@@ -189,7 +196,7 @@
             {:else}
               <span class="holder">{folder.label}</span>
             {/if}
-            {#if !folder.role}
+            {#if folder.selectable || !folder.role}
               <button
                 type="button"
                 class="more"
@@ -206,15 +213,25 @@
           {#if menuFor === folder.name}
             <div class="menu" role="menu">
               <button type="button" role="menuitem" onclick={() => startCreate(folder.name)}>{strings.folders.newSubfolder}</button>
-              <button type="button" role="menuitem" onclick={() => startRename(folder)}>{strings.folders.rename}</button>
-              <button
-                type="button"
-                role="menuitem"
-                onclick={() => {
-                  menuFor = null;
-                  onDelete(folder);
-                }}>{strings.folders.delete}</button
-              >
+              {#if !folder.role}
+                <button type="button" role="menuitem" onclick={() => startRename(folder)}>{strings.folders.rename}</button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onclick={() => {
+                    menuFor = null;
+                    onPickParent(folder);
+                  }}>{strings.folders.moveFolder}</button
+                >
+                <button
+                  type="button"
+                  role="menuitem"
+                  onclick={() => {
+                    menuFor = null;
+                    onDelete(folder);
+                  }}>{strings.folders.delete}</button
+                >
+              {/if}
             </div>
           {/if}
         {/if}
