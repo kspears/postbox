@@ -100,9 +100,8 @@ func (a *apiHandler) passkeyOptions(w http.ResponseWriter, r *http.Request, s *s
 // addPasskey answers POST /api/passkeys {"nonce", "credential", "prf"}: it stores the new
 // passkey with the session's password sealed under its PRF output.
 func (a *apiHandler) addPasskey(w http.ResponseWriter, r *http.Request, s *session.Session) {
-	if a.needsConfirmation(w, s) {
-		return
-	}
+	// No confirmation check: the nonce came from passkeyOptions, which needed one, and is this
+	// account's alone. Checking again would lose a passkey whose prompt ran past the window.
 	var req passkeyAnswer
 	if !decodeUpTo(w, r, &req, 64<<10) {
 		return
