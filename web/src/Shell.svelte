@@ -42,7 +42,7 @@
   import { applyAppearance } from './appearance';
   import Settings from './Settings.svelte';
   import UndoNotice, { type Notice } from './UndoNotice.svelte';
-  import { closeConversation, openConversation, openFolder, openMessage, route } from './route.svelte';
+  import { closeConversation, openFolder, openMessage, route } from './route.svelte';
   import { strings } from './strings';
 
   interface Props {
@@ -326,10 +326,7 @@
   function markedRead(id: number): void {
     const row = rows.find((r) => r.id === id);
     if (row) row.unread = false;
-    if (searching && openLoaded?.id === id) {
-      const read = new Set(openLoaded.messages.filter((m) => m.folder === route.folder).map((m) => m.uid));
-      for (const r of searching.results) if (r.folder === route.folder && read.has(r.uid)) r.unread = false;
-    }
+    if (openLoaded?.id === id) patchFound(openLoaded.messages.map((m) => m.uid), { unread: false });
     loadFolders(true);
   }
 
@@ -406,55 +403,89 @@
   // folder it was started from.
   let searchText = $state('');
   let searchBox = $state<HTMLInputElement>();
-  let searching = $state<{ query: string; from: string; results: Found[]; next?: number; loading: boolean } | null>(
-    null,
-  );
-  let searchGeneration = 0;
+  let searching = $state<{
+    query: string;
+    from: string;
+    results: Found[];
+    next?: number;
+    loading: boolean;
+    failed: boolean;
+  } | null>(null);
+  // The search request in flight; a newer one, or closing the search, stops it on the server too.
+  let searchRequest: AbortController | undefined;
 
   async function runSearch(query: string, from: string, more = false): Promise<void> {
     if (!query) return closeSearch();
-    const mine = ++searchGeneration;
+    searchRequest?.abort();
+    const request = (searchRequest = new AbortController());
     const offset = more ? (searching?.next ?? 0) : 0;
-    searching = { query, from, results: more ? (searching?.results ?? []) : [], next: undefined, loading: true };
-    const result = await fetchSearch(query, from, offset);
-    if (mine !== searchGeneration || !searching) return;
+    if (more && searching) Object.assign(searching, { next: undefined, loading: true, failed: false });
+    else {
+      // Ticks in the hidden list must not be what e and # act on.
+      checked = [];
+      searching = { query, from, results: [], next: undefined, loading: true, failed: false };
+    }
+    const result = await fetchSearch(query, from, offset, request.signal);
+    if (request !== searchRequest || !searching) return;
     searching.loading = false;
-    if (!result.ok) return failed(result.error);
-    searching.results = [...searching.results, ...result.value.messages];
+    if (!result.ok) {
+      searching.failed = true;
+      if (handle(result.error) !== null) notice = { text: strings.actions.failed };
+      return;
+    }
+    // A message that arrived since the last page shifts the rest down: skip what is already shown.
+    const shown = new Set(searching.results.map((r) => `${r.folder}\u0000${r.id}`));
+    searching.results.push(...result.value.messages.filter((r) => !shown.has(`${r.folder}\u0000${r.id}`)));
     searching.next = result.value.next;
   }
 
   function closeSearch(): void {
-    searchGeneration++;
+    searchRequest?.abort();
+    searchRequest = undefined;
+    if (!searching) return;
     searching = null;
     searchText = '';
+    // Moves made from the results may have changed the folder's list.
+    void refreshList();
   }
 
-  function openFound(r: Found): void {
-    if (folderList.find((f) => f.name === r.folder)?.role === 'drafts') void compose('draft', r.folder, r.uid);
-    else openMessage(r.folder, r.uid);
+  // Search results in the open folder among uids take patch, as their conversations' rows do.
+  function patchFound(uids: number[], patch: Partial<Found>): void {
+    for (const r of searching?.results ?? []) if (r.folder === route.folder && uids.includes(r.id)) Object.assign(r, patch);
   }
 
-  const folderLabel = (name: string): string => folderList.find((f) => f.name === name)?.label ?? name;
+  // Opens a conversation in folder; a draft opens in the composer, not the reading pane.
+  function openItem(folder: string, id: number, latest?: number): void {
+    if (folderNamed(folder)?.role === 'drafts') void compose('draft', folder, latest);
+    else openMessage(folder, id);
+  }
+
+  const folderNamed = (name: string): Folder | undefined => folderList.find((f) => f.name === name);
+  const folderLabel = (name: string): string => folderNamed(name)?.label ?? name;
 
   // --- keyboard shortcuts ---
   // Inactive while typing, and while a composer, dialog or menu is open.
   function shortcut(event: KeyboardEvent): void {
     if (event.key === 'Escape') menuOpen = false;
-    if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return;
-    if (composing || settingsOpen || asking || menuOpen) return;
+    // Option is part of typing # on some keyboards.
+    if (event.defaultPrevented || event.ctrlKey || event.metaKey || (event.altKey && event.key !== '#')) return;
+    if (composing || menuOpen || showFolders) return;
     const target = event.target as HTMLElement | null;
-    if (target?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')) return;
+    const typing =
+      'dialog, textarea, select, [contenteditable]:not([contenteditable="false"]), ' +
+      'input:not([type="checkbox"], [type="radio"], [type="button"], [type="submit"], [type="reset"])';
+    if (target?.closest(typing)) return;
     const role = currentFolder?.role;
-    const acting = checked.length > 0 ? checked : openConversationRow ? [openConversationRow.id] : [];
+    const ticked = searching ? [] : checked;
+    const acting = ticked.length > 0 ? ticked : openConversationRow ? [openConversationRow.id] : [];
     switch (event.key) {
       case 'c':
         void compose('new');
         break;
       case 'r': {
-        const latest = openLoaded?.messages.filter((m) => m.folder === route.folder).at(-1);
-        if (!latest || openLoaded?.id !== route.conversation) return;
-        void compose('reply', latest.folder, latest.uid);
+        const latest = openConversationRow?.uids.at(-1);
+        if (latest === undefined) return;
+        void compose('reply', route.folder, latest);
         break;
       }
       case 'e':
@@ -482,20 +513,14 @@
   function step(by: 1 | -1): void {
     if (searching) {
       const list = searching.results;
-      const at = list.findIndex((r) => r.folder === route.folder && r.uid === route.conversation);
+      const at = list.findIndex((r) => r.folder === route.folder && r.id === route.conversation);
       const r = list[at < 0 ? 0 : at + by];
-      if (r) openFound(r);
+      if (r) openItem(r.folder, r.id, r.id);
       return;
     }
     const at = shownRows.findIndex((r) => r.id === route.conversation);
     const row = shownRows[at < 0 ? 0 : at + by];
-    if (row) openListed(row);
-  }
-
-  function openListed(row: Conversation): void {
-    // A draft opens in the composer, not the reading pane.
-    if (currentFolder?.role === 'drafts') void compose('draft', route.folder, row.uids.at(-1));
-    else openConversation(row.id);
+    if (row) openItem(route.folder, row.id, row.uids.at(-1));
   }
 
   // --- actions on conversations ---
@@ -532,7 +557,7 @@
       return failed(result.error);
     }
     loadFolders(true);
-    if (searching) void runSearch(searching.query, searching.from);
+    if (searching) searching.results = searching.results.filter((r) => r.folder !== folder || !uids.includes(r.id));
     const moved = result.value;
     notice = {
       text: text(targets.length),
@@ -560,6 +585,7 @@
       if (row) Object.assign(row, patch);
       pendingFlags.set(r.id, { patch });
     }
+    patchFound(uids, patch);
     const result = await setFlag(route.folder, uids, flag, on);
     // The open conversation shows the change without fetching it again.
     if (openLoaded && targets.some((r) => r.id === openLoaded?.id)) {
@@ -740,6 +766,8 @@
       role="search"
       onsubmit={(e) => {
         e.preventDefault();
+        // Out of the box, so j and k move through the results.
+        searchBox?.blur();
         void runSearch(searchText.trim(), route.folder);
       }}
     >
@@ -812,6 +840,7 @@
       current={route.folder}
       onOpen={(name) => {
         showFolders = false;
+        closeSearch();
         openFolder(name);
       }}
       onDropConversations={(name, from, ids) => {
@@ -836,11 +865,12 @@
           account={account.account}
           results={searching.results}
           loading={searching.loading}
+          failed={searching.failed}
           hasMore={searching.next !== undefined && !searching.loading}
           label={folderLabel}
-          selected={route.conversation ? { folder: route.folder, uid: route.conversation } : undefined}
+          selected={route.conversation ? { folder: route.folder, id: route.conversation } : undefined}
           onMore={() => searching && runSearch(searching.query, searching.from, true)}
-          onOpen={openFound}
+          onOpen={(r) => openItem(r.folder, r.id, r.id)}
         />
       {:else}
       <div class="title">
@@ -876,8 +906,7 @@
           onMore={() => loadPage(false)}
           onOpen={(id) => {
             const row = rows.find((r) => r.id === id);
-            if (row) openListed(row);
-            else openConversation(id);
+            if (row) openItem(route.folder, row.id, row.uids.at(-1));
           }}
         />
       {/if}

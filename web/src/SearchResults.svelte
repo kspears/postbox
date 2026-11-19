@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Found } from './api';
+  import { longDate, when, who } from './listFormat';
   import { path } from './route.svelte';
   import { strings } from './strings';
 
@@ -7,14 +8,16 @@
     account: string;
     results: Found[];
     loading: boolean;
+    // The search could not be done: no claim that nothing matches.
+    failed: boolean;
     hasMore: boolean;
     // The label to show for a folder's name.
     label: (folder: string) => string;
-    selected?: { folder: string; uid: number };
+    selected?: { folder: string; id: number };
     onMore: () => void;
     onOpen: (r: Found) => void;
   }
-  const { account, results, loading, hasMore, label, selected, onMore, onOpen }: Props = $props();
+  const { account, results, loading, failed, hasMore, label, selected, onMore, onOpen }: Props = $props();
 
   function open(event: MouseEvent, r: Found): void {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
@@ -36,47 +39,28 @@
     return () => observer.disconnect();
   });
 
-  function who(r: Found): string {
-    const p = r.from[0];
-    if (!p) return '';
-    return p.email === account ? 'me' : p.name || p.email.split('@')[0] || p.email;
-  }
-
-  const today = new Date();
-  const time = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
-  const dayMonth = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' });
-  const full = new Intl.DateTimeFormat(undefined, { dateStyle: 'short' });
-  const long = new Intl.DateTimeFormat(undefined, { dateStyle: 'full', timeStyle: 'short' });
-
-  function when(iso: string): string {
-    const d = new Date(iso);
-    if (d.toDateString() === today.toDateString()) return time.format(d);
-    if (d.getFullYear() === today.getFullYear()) return dayMonth.format(d);
-    return full.format(d);
-  }
-
-  const isSelected = (r: Found) => selected?.folder === r.folder && selected.uid === r.uid;
+  const isSelected = (r: Found) => selected?.folder === r.folder && selected.id === r.id;
 </script>
 
 <section class="list" aria-label={strings.search.results}>
-  {#if results.length === 0 && !loading}
+  {#if results.length === 0 && !loading && !failed}
     <p class="note">{strings.search.none}</p>
   {/if}
   <ul>
-    {#each results as r (`${r.folder}\u0000${r.uid}`)}
+    {#each results as r (`${r.folder}\u0000${r.id}`)}
       <li class:unread={r.unread} class:selected={isSelected(r)}>
         <a
           class="row"
-          href={path({ folder: r.folder, conversation: r.uid })}
+          href={path({ folder: r.folder, conversation: r.id })}
           aria-current={isSelected(r) ? 'true' : undefined}
           onclick={(e) => open(e, r)}
         >
           <div class="top">
-            <span class="who">{who(r)}</span>
+            <span class="who">{who(r.participants, account)}</span>
             <span class="folder">{label(r.folder)}</span>
             {#if r.attachments}<span class="mark" role="img" aria-label={strings.list.attachment}>📎</span>{/if}
             {#if r.flagged}<span class="mark flag" role="img" aria-label={strings.list.flagged}>⚑</span>{/if}
-            <time datetime={r.date} title={long.format(new Date(r.date))}>{when(r.date)}</time>
+            <time datetime={r.date} title={longDate(r.date)}>{when(r.date)}</time>
           </div>
           <div class="subject">
             {#if r.unread}<span class="dot" role="img" aria-label={strings.list.unread}></span>{/if}

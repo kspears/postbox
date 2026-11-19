@@ -5,6 +5,7 @@ import (
 	"slices"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/emersion/go-imap/v2"
 )
@@ -66,6 +67,7 @@ func TestEachFolder(t *testing.T) {
 			}
 		}
 		defer running.Add(-1)
+		time.Sleep(20 * time.Millisecond) // long enough for every worker to be running at once
 		return []string{f + "1"}, nil
 	})
 	if err != nil {
@@ -74,8 +76,8 @@ func TestEachFolder(t *testing.T) {
 	if !slices.Equal(slices.Concat(got...), []string{"a1", "b1", "c1", "d1", "e1"}) {
 		t.Errorf("answers %v are not in folder order", got)
 	}
-	if most.Load() > searchParallel {
-		t.Errorf("%d folders searched at once, limit %d", most.Load(), searchParallel)
+	if most.Load() != commandConns {
+		t.Errorf("%d folders searched at once, limit %d", most.Load(), commandConns)
 	}
 
 	boom := errors.New("boom")
@@ -89,5 +91,33 @@ func TestEachFolder(t *testing.T) {
 	}
 	if got, err := eachFolder(nil, func(string) ([]int, error) { return nil, nil }); err != nil || len(got) != 0 {
 		t.Errorf("no folders: %v, %v", got, err)
+	}
+}
+
+func TestScope(t *testing.T) {
+	folders := []Folder{
+		{Name: "INBOX", Role: RoleInbox, Selectable: true},
+		{Name: "Archive", Role: RoleArchive, Selectable: true},
+		{Name: "Projects", Selectable: false},
+		{Name: "Projects/Q3", Selectable: true},
+		{Name: "Junk", Role: RoleJunk, Selectable: true},
+		{Name: "Trash", Role: RoleTrash, Selectable: true},
+		{Name: "Trash/Old", Selectable: true},
+		{Name: "Trashcan", Selectable: true},
+	}
+	for _, tc := range []struct {
+		from string
+		want []string
+	}{
+		{"INBOX", []string{"INBOX", "Archive", "Projects/Q3", "Trashcan"}},
+		{"Projects/Q3", []string{"INBOX", "Archive", "Projects/Q3", "Trashcan"}},
+		{"Junk", []string{"Junk"}},
+		{"Trash", []string{"Trash", "Trash/Old"}},
+		{"Trash/Old", []string{"Trash", "Trash/Old"}},
+		{"Gone", []string{"INBOX", "Archive", "Projects/Q3", "Trashcan"}},
+	} {
+		if got := scope(folders, "/", tc.from); !slices.Equal(got, tc.want) {
+			t.Errorf("from %q: %v, want %v", tc.from, got, tc.want)
+		}
 	}
 }

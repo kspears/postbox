@@ -37,10 +37,6 @@ export function openFolder(name: string): void {
   go({ folder: name });
 }
 
-export function openConversation(id: number): void {
-  go({ folder: route.folder, conversation: id });
-}
-
 export function openMessage(folder: string, id: number): void {
   go({ folder, conversation: id });
 }

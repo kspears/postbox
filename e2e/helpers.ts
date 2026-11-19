@@ -105,20 +105,24 @@ export async function deliver(to: string, subject: string, body: string, headers
   ]);
 }
 
-/** What another IMAP client fetches (items, such as FLAGS) of the message with subject in one of
- * account's folders. */
-export async function fetchBySubject(account: string, folder: string, subject: string, items: string): Promise<string> {
+/** The sequence number of the message with subject in one of account's folders. */
+async function idBySubject(account: string, folder: string, subject: string): Promise<string> {
   const found = await imap(account, [`EXAMINE ${quoted(folder)}`, `SEARCH SUBJECT ${quoted(subject)}`]);
   const id = /^\* SEARCH (\d+)/m.exec(found)?.[1];
   if (!id) throw new Error(`no message "${subject}" in ${account}'s ${folder}`);
+  return id;
+}
+
+/** What another IMAP client fetches (items, such as FLAGS) of the message with subject in one of
+ * account's folders. */
+export async function fetchBySubject(account: string, folder: string, subject: string, items: string): Promise<string> {
+  const id = await idBySubject(account, folder, subject);
   return imap(account, [`EXAMINE ${quoted(folder)}`, `FETCH ${id} ${items}`]);
 }
 
 /** Moves the message with subject from account's Inbox to folder, as another IMAP client would. */
 export async function fileBySubject(account: string, subject: string, folder: string): Promise<void> {
-  const found = await imap(account, ['SELECT INBOX', `SEARCH SUBJECT ${quoted(subject)}`]);
-  const id = /^\* SEARCH (\d+)/m.exec(found)?.[1];
-  if (!id) throw new Error(`no message "${subject}" in ${account}'s INBOX`);
+  const id = await idBySubject(account, 'INBOX', subject);
   const out = await imap(account, ['SELECT INBOX', `MOVE ${id} ${quoted(folder)}`]);
   if (!/^t2 OK/m.test(out)) throw new Error(`moving "${subject}" to ${folder}: ${out}`);
 }

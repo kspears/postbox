@@ -97,13 +97,19 @@ test('criterion 27: each shortcut does its job, and none fires while typing', as
   await expect.poll(() => subjectsIn(account, 'Archive')).toContain(third);
   await expect.poll(() => subjectsIn(account, 'Trash')).toContain(newer);
 
+  // With a row ticked by a click, e acts on it, though the box has the focus.
+  const olderRow = list.getByRole('listitem').filter({ hasText: older });
+  await olderRow.getByRole('checkbox').click();
+  await page.keyboard.press('e');
+  await expect(olderRow).toHaveCount(0);
+  await expect.poll(() => subjectsIn(account, 'Archive')).toContain(older);
+
   // / goes to the search box, where j is just a letter.
   const box = page.getByRole('searchbox', { name: 'Search mail' });
   await page.keyboard.press('/');
   await expect(box).toBeFocused();
   await page.keyboard.type('jk');
   await expect(box).toHaveValue('jk');
-  await expect(reading).not.toContainText(older);
   await box.blur();
 
   // c composes.
