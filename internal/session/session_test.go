@@ -42,7 +42,7 @@ func request(c *http.Cookie) *http.Request {
 
 func TestRoundTrip(t *testing.T) {
 	m, _, _ := newManager(t, true)
-	c, err := m.Create(context.Background(), "alice@example.test", password, Password, false)
+	c, _, err := m.Create(context.Background(), "alice@example.test", password, Password, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ func TestRoundTrip(t *testing.T) {
 
 func TestInsecureOriginCookie(t *testing.T) {
 	m, _, _ := newManager(t, false)
-	c, _ := m.Create(context.Background(), "a@example.test", password, Password, false)
+	c, _, _ := m.Create(context.Background(), "a@example.test", password, Password, false)
 	if c.Name != "postbox_session" || c.Secure {
 		t.Errorf("cookie for an http://localhost origin: %+v", c)
 	}
@@ -81,7 +81,7 @@ func TestLifetimes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m, clk, _ := newManager(t, true)
-			c, err := m.Create(context.Background(), "a@example.test", password, tt.method, tt.keep)
+			c, _, err := m.Create(context.Background(), "a@example.test", password, tt.method, tt.keep)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -102,7 +102,7 @@ func TestLifetimes(t *testing.T) {
 
 func TestRejectsBadCookies(t *testing.T) {
 	m, _, _ := newManager(t, true)
-	good, _ := m.Create(context.Background(), "a@example.test", password, Password, false)
+	good, _, _ := m.Create(context.Background(), "a@example.test", password, Password, false)
 	id, _, _ := strings.Cut(good.Value, ".")
 	otherKey := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32))
 
@@ -146,9 +146,9 @@ func TestSealedPasswordIsBoundToItsRow(t *testing.T) {
 func TestSignOut(t *testing.T) {
 	m, _, _ := newManager(t, true)
 	ctx := context.Background()
-	a1, _ := m.Create(ctx, "a@example.test", password, Password, false)
-	a2, _ := m.Create(ctx, "a@example.test", password, Password, true)
-	b, _ := m.Create(ctx, "b@example.test", password, Password, false)
+	a1, _, _ := m.Create(ctx, "a@example.test", password, Password, false)
+	a2, _, _ := m.Create(ctx, "a@example.test", password, Password, true)
+	b, _, _ := m.Create(ctx, "b@example.test", password, Password, false)
 
 	s1, _ := m.FromRequest(request(a1))
 	gone, err := m.End(ctx, s1)
@@ -176,7 +176,7 @@ func TestSignOut(t *testing.T) {
 
 func TestSurvivesReopen(t *testing.T) {
 	m, clk, dir := newManager(t, true)
-	c, _ := m.Create(context.Background(), "a@example.test", password, Password, true)
+	c, _, _ := m.Create(context.Background(), "a@example.test", password, Password, true)
 
 	st, err := store.Open(context.Background(), dir)
 	if err != nil {
@@ -193,7 +193,7 @@ func TestSurvivesReopen(t *testing.T) {
 // that can be read back.
 func TestDatabaseNeverHoldsThePassword(t *testing.T) {
 	m, _, dir := newManager(t, true)
-	if _, err := m.Create(context.Background(), "a@example.test", password, Password, true); err != nil {
+	if _, _, err := m.Create(context.Background(), "a@example.test", password, Password, true); err != nil {
 		t.Fatal(err)
 	}
 	encodings := map[string]string{
@@ -219,28 +219,39 @@ func TestDatabaseNeverHoldsThePassword(t *testing.T) {
 	}
 }
 
-// A new session may change passkeys for ConfirmLife; after that it needs Confirm, which lasts
-// as long again and survives a reload of the session.
+// A new session's tab may change passkeys for ConfirmLife with the token it was given; a
+// request without it, as a copy of the cookie alone would make, may not. After that the tab
+// needs Confirm, whose token replaces the old one.
 func TestConfirmation(t *testing.T) {
 	m, clk, _ := newManager(t, true)
 	ctx := context.Background()
-	c, err := m.Create(ctx, "alice@example.test", password, Password, false)
+	c, token, err := m.Create(ctx, "alice@example.test", password, Password, false)
+	if err != nil || token == "" {
+		t.Fatal(token, err)
+	}
+	s, _ := m.FromRequest(request(c))
+	if !m.Confirmed(s, token) {
+		t.Error("the signing-in tab is not confirmed")
+	}
+	if m.Confirmed(s, "") || m.Confirmed(s, "guess") {
+		t.Error("confirmed without the token")
+	}
+	clk.Advance(ConfirmLife)
+	if m.Confirmed(s, token) {
+		t.Error("still confirmed after ConfirmLife")
+	}
+	again, err := m.Confirm(ctx, s)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, _ := m.FromRequest(request(c))
-	if !m.Confirmed(s) {
-		t.Error("a new session is not confirmed")
+	s, _ = m.FromRequest(request(c))
+	if !m.Confirmed(s, again) || m.Confirmed(s, token) {
+		t.Error("Confirm's token does not replace the old one")
 	}
-	clk.Advance(ConfirmLife)
-	if m.Confirmed(s) {
-		t.Error("still confirmed after ConfirmLife")
-	}
-	if err := m.Confirm(ctx, s); err != nil {
+	if _, err := m.End(ctx, s); err != nil {
 		t.Fatal(err)
 	}
-	s, _ = m.FromRequest(request(c))
-	if !m.Confirmed(s) {
-		t.Error("not confirmed after Confirm")
+	if _, err := m.Confirm(ctx, s); !errors.Is(err, ErrNoSession) {
+		t.Errorf("confirming an ended session: %v", err)
 	}
 }

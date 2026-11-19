@@ -110,7 +110,8 @@
       }
       if (created === cancelled) return;
       if (!created.ok) {
-        if (created.error === 'confirm_needed') confirmFirst(addPasskey);
+        // Not run again by itself: some browsers allow a passkey prompt only straight after a click.
+        if (created.error === 'confirm_needed') confirmFirst(null);
         else passkeyProblem = strings.settings.passkeyFailed;
         return;
       }
@@ -168,20 +169,27 @@
 
   // --- the password again ---
   // Changing passkeys needs the password entered recently; the change waits here until it is.
-  let waiting = $state<(() => Promise<void>) | null>(null);
+  // null while asking: nothing to run after (adding a passkey is started again by its button).
+  let waiting = $state<{ then: (() => Promise<void>) | null } | null>(null);
   let confirmText = $state('');
   let confirmProblem = $state('');
+  let confirmWorking = $state(false);
+  let addButton = $state<HTMLButtonElement>();
 
-  function confirmFirst(then: () => Promise<void>): void {
-    waiting = then;
+  function confirmFirst(then: (() => Promise<void>) | null): void {
+    waiting = { then };
     confirmText = '';
     confirmProblem = '';
   }
 
   async function confirm(event: SubmitEvent): Promise<void> {
     event.preventDefault();
-    const result = await confirmPassword(confirmText);
+    if (confirmWorking) return;
+    confirmWorking = true;
+    const result = await confirmPassword(confirmText).finally(() => (confirmWorking = false));
     if (!result.ok) {
+      // The session ended meanwhile: the reload shows the sign-in screen.
+      if (result.error === 'signed_out') location.reload();
       confirmText = '';
       confirmProblem =
         result.error === 'wrong_credentials'
@@ -189,9 +197,10 @@
           : (strings.errors[result.error as keyof typeof strings.errors] ?? strings.errors.internal);
       return;
     }
-    const then = waiting;
+    const then = waiting?.then;
     waiting = null;
-    await then?.();
+    if (then) await then();
+    else addButton?.focus();
   }
 
   const appearances = [
@@ -275,7 +284,7 @@
           </label>
           {#if confirmProblem}<p class="error-banner" role="alert">{confirmProblem}</p>{/if}
           <div class="buttons">
-            <button type="submit" class="primary">{strings.settings.confirmContinue}</button>
+            <button type="submit" class="primary" disabled={confirmWorking}>{strings.settings.confirmContinue}</button>
             <button type="button" onclick={() => (waiting = null)}>{strings.settings.cancel}</button>
           </div>
         </form>
@@ -284,7 +293,7 @@
         <p class="note">{strings.settings.finishPasskey}</p>
         <button type="button" class="add" disabled={working} onclick={finishPasskey}>{strings.settings.finish}</button>
       {:else}
-        <button type="button" class="add" disabled={working} onclick={addPasskey}>{strings.settings.addPasskey}</button>
+        <button type="button" class="add" disabled={working} onclick={addPasskey} bind:this={addButton}>{strings.settings.addPasskey}</button>
       {/if}
       <label class="require">
         <input

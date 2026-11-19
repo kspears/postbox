@@ -115,14 +115,14 @@ func (a *apiHandler) signInFailed(w http.ResponseWriter, r *http.Request, err er
 
 // startSession signs account in on this browser and answers who is signed in.
 func (a *apiHandler) startSession(w http.ResponseWriter, r *http.Request, account, password, method string, keep bool) {
-	cookie, err := a.Sessions.Create(r.Context(), account, password, method, keep)
+	cookie, confirm, err := a.Sessions.Create(r.Context(), account, password, method, keep)
 	if err != nil {
 		internalError(w, r, err)
 		return
 	}
 	http.SetCookie(w, cookie)
 	a.Addresses.SeedOnce(mail.Account{ClientIP: a.clientIP(r), Name: account, Password: password})
-	writeJSON(w, http.StatusOK, whoAmI{Account: account, Method: method})
+	writeJSON(w, http.StatusOK, whoAmI{Account: account, Method: method, Confirm: confirm})
 }
 
 type sessionHandler func(http.ResponseWriter, *http.Request, *session.Session)
@@ -155,6 +155,8 @@ func hasCookie(r *http.Request, name string) bool {
 type whoAmI struct {
 	Account string `json:"account"`
 	Method  string `json:"method"`
+	// Confirm, at sign-in only, is the token that lets this tab change passkeys for a while.
+	Confirm string `json:"confirm,omitempty"`
 }
 
 func (a *apiHandler) whoAmI(w http.ResponseWriter, _ *http.Request, s *session.Session) {

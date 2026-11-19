@@ -4,6 +4,7 @@ package auth
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
 	"errors"
 	"fmt"
@@ -140,8 +141,15 @@ func (a *Authenticator) ConfirmPassword(ctx context.Context, clientIP netip.Addr
 	if err := a.checkBlocked(ctx, account, ip); err != nil {
 		return err
 	}
-	if subtle.ConstantTimeCompare([]byte(typed), []byte(actual)) != 1 {
+	// Hashed first, so the comparison takes as long whatever the lengths.
+	t, want := sha256.Sum256([]byte(typed)), sha256.Sum256([]byte(actual))
+	if subtle.ConstantTimeCompare(t[:], want[:]) != 1 {
+		// The mail server never sees these guesses, so the log is the operator's only trace.
+		log.Printf("confirm password: wrong password for %s from %s", account, ip)
 		return a.fail(ctx, account, ip)
+	}
+	if err := a.store.ClearFailures(context.WithoutCancel(ctx), account, ip); err != nil {
+		log.Printf("confirm password: clear failures: %v", err)
 	}
 	return nil
 }

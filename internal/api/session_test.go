@@ -26,6 +26,11 @@ const origin = "https://mail.example.test"
 // so only paths that do not need one can succeed.
 func newHandler(t *testing.T, dist fs.FS) http.Handler {
 	t.Helper()
+	return NewHandler(dist, newDeps(t))
+}
+
+func newDeps(t *testing.T) Deps {
+	t.Helper()
 	st, err := store.Open(context.Background(), t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -38,7 +43,7 @@ func newHandler(t *testing.T, dist fs.FS) http.Handler {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return NewHandler(dist, Deps{
+	return Deps{
 		Sessions:       session.NewManager(st, clk, true),
 		Auth:           authenticator,
 		Mail:           pool,
@@ -50,7 +55,7 @@ func newHandler(t *testing.T, dist fs.FS) http.Handler {
 		Clock:          clk,
 		Origin:         origin,
 		ClientIPHeader: "X-Real-IP",
-	})
+	}
 }
 
 func signIn(t *testing.T, h http.Handler, body, ip string) *httptest.ResponseRecorder {
@@ -192,5 +197,56 @@ func TestReleaseBuildHasNoTestClock(t *testing.T) {
 	h.ServeHTTP(w, r)
 	if w.Code != 404 {
 		t.Errorf("got %d, want 404", w.Code)
+	}
+}
+
+// Changing passkeys and "Require passkey" needs the confirmation token the signing-in tab was
+// given: the session cookie alone, as a thief would have it, is refused.
+func TestPasskeyChangesNeedTheTabsToken(t *testing.T) {
+	deps := newDeps(t)
+	h := NewHandler(dist, deps)
+	cookie, token, err := deps.Sessions.Create(t.Context(), "a@example.test", "pw", session.Password, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	send := func(method, path, body, confirm string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, path, strings.NewReader(body))
+		r.Header.Set("Origin", origin)
+		r.AddCookie(cookie)
+		if confirm != "" {
+			r.Header.Set(confirmHeader, confirm)
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w
+	}
+	gated := []struct{ method, path, body string }{
+		{"POST", "/api/passkeys/options", ``},
+		{"POST", "/api/passkeys/delete", `{"id":"AAAA"}`},
+		{"PUT", "/api/require-passkey", `{"on":false}`},
+	}
+	for _, g := range gated {
+		if w := send(g.method, g.path, g.body, ""); w.Code != 403 || errorCode(t, w) != errConfirmNeeded {
+			t.Errorf("%s %s without the token: %d %s", g.method, g.path, w.Code, w.Body.String())
+		}
+		if w := send(g.method, g.path, g.body, "guess"); w.Code != 403 {
+			t.Errorf("%s %s with a wrong token: %d", g.method, g.path, w.Code)
+		}
+		if w := send(g.method, g.path, g.body, token); w.Code == 403 {
+			t.Errorf("%s %s with the token: %d %s", g.method, g.path, w.Code, w.Body.String())
+		}
+	}
+
+	// Entering the password again gives a new token; a wrong password gives none.
+	if w := send("POST", "/api/session/confirm", `{"password":"nope"}`, ""); w.Code != 401 || errorCode(t, w) != errWrongCredentials {
+		t.Errorf("wrong password: %d %s", w.Code, w.Body.String())
+	}
+	w := send("POST", "/api/session/confirm", `{"password":"pw"}`, "")
+	var got struct{ Confirm string }
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &got) != nil || got.Confirm == "" || got.Confirm == token {
+		t.Fatalf("right password: %d %s", w.Code, w.Body.String())
+	}
+	if w := send("PUT", "/api/require-passkey", `{"on":false}`, got.Confirm); w.Code != 204 {
+		t.Errorf("with the new token: %d %s", w.Code, w.Body.String())
 	}
 }

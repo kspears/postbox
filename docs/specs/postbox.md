@@ -88,9 +88,11 @@ an operator who deploys the container and runs its CLI.
    least one passkey. While it is on, password sign-in to Postbox is refused for that account.
    Turning it on ends the account's sessions that were started with a password.
 5. Adding a passkey, removing one, and turning "Require passkey" on or off need the password
-   entered in the last 10 minutes; signing in counts. Otherwise Settings asks "Enter your
-   password to change passkeys." with one "Password" field and "Continue", then goes ahead.
-   A wrong password shows "Wrong password." and counts as a failed sign-in attempt.
+   entered in the same browser tab in the last 10 minutes; signing in there, with a password
+   or a passkey, counts. Otherwise Settings asks "Enter your password to change passkeys."
+   with one "Password" field and "Continue", then makes the change (adding a passkey starts
+   again from its button). A wrong password shows "Wrong password." and counts as a failed
+   sign-in attempt.
 
 ### Reading
 
@@ -590,7 +592,7 @@ performance panel, median of five tries.
 | Enrolment with a provider that reports no PRF support | Saved straight away under the server key, with no second prompt | Asking again cannot produce a key such a provider lacks | agent default |
 | Removing a passkey, or `postbox passkeys clear` | Also ends the account's passkey sessions, other than the one that asked | A passkey is removed because it was lost; its sessions should not outlive it. Sessions do not record which passkey started them, so all passkey sessions go | agent default |
 | Failed sign-ins with a passkey Postbox does not know | Count against that passkey and the client IP's limit, not an account | One removed passkey retried must not block every passkey sign-in from the address | agent default |
-| Changing passkeys or "Require passkey" | Needs the password entered in the last 10 minutes (a sign-in counts); checked against the session's own password, without asking the mail server | A stolen session cookie must not be able to add its own passkey or lock the owner out | user (the 10 minutes and password-only: agent default) |
+| Changing passkeys or "Require passkey" | Needs the password entered in the same tab in the last 10 minutes (a sign-in counts), proved by a token the tab keeps in session storage and sends with the change; checked against the session's own password, without asking the mail server, and wrong attempts are logged | A stolen session cookie must not be able to add its own passkey or lock the owner out, even while the owner has just confirmed. A passkey session confirms against the password unsealed at its sign-in, so a password changed elsewhere is refused until the next sign-in | user (the 10 minutes, the tab token and password-only: agent default) |
 | Lost passkey | Remove after password sign-in; operator CLI clears when "Require passkey" is on | Simple recovery path | agent default |
 | Password change | Ends password sessions; a passkey asks for the new password once and is kept | No lockout when "Require passkey" is on | user |
 | Accounts | One account per login, several identities | Unified inbox deferred | user |

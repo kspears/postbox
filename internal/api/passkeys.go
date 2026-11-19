@@ -22,18 +22,25 @@ const (
 	errConfirmNeeded      = "confirm_needed" // enter the password again first
 )
 
-// needsConfirmation answers 403 confirm_needed, and reports true, when the session has not
-// entered the password recently: changing passkeys must take more than a stolen cookie.
-func (a *apiHandler) needsConfirmation(w http.ResponseWriter, s *session.Session) bool {
-	if a.Sessions.Confirmed(s) {
-		return false
+// confirmHeader carries the confirmation token the tab got at sign-in or by entering the
+// password again.
+const confirmHeader = "X-Postbox-Confirm"
+
+// withConfirmed runs next only for a tab that entered the password recently, and answers 403
+// confirm_needed otherwise: changing passkeys must take more than a stolen cookie.
+func (a *apiHandler) withConfirmed(next sessionHandler) sessionHandler {
+	return func(w http.ResponseWriter, r *http.Request, s *session.Session) {
+		if !a.Sessions.Confirmed(s, r.Header.Get(confirmHeader)) {
+			writeError(w, http.StatusForbidden, errConfirmNeeded)
+			return
+		}
+		next(w, r, s)
 	}
-	writeError(w, http.StatusForbidden, errConfirmNeeded)
-	return true
 }
 
-// confirmPassword answers POST /api/session/confirm {"password"}: the password entered again,
-// which lets this session change passkeys and "Require passkey" for a while.
+// confirmPassword answers POST /api/session/confirm {"password"} with {"confirm": token}: the
+// password entered again, which lets the tab holding the token change passkeys and "Require
+// passkey" for a while.
 func (a *apiHandler) confirmPassword(w http.ResponseWriter, r *http.Request, s *session.Session) {
 	var req struct {
 		Password string `json:"password"`
@@ -45,11 +52,16 @@ func (a *apiHandler) confirmPassword(w http.ResponseWriter, r *http.Request, s *
 	if a.signInFailed(w, r, err) {
 		return
 	}
-	if err := a.Sessions.Confirm(r.Context(), s); err != nil {
+	token, err := a.Sessions.Confirm(r.Context(), s)
+	if errors.Is(err, session.ErrNoSession) {
+		writeError(w, http.StatusUnauthorized, errSignedOut)
+		return
+	}
+	if err != nil {
 		internalError(w, r, err)
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	writeJSON(w, http.StatusOK, map[string]string{"confirm": token})
 }
 
 // passkeyView is a passkey as Settings lists it.
@@ -87,9 +99,6 @@ func (a *apiHandler) passkeys(w http.ResponseWriter, r *http.Request, s *session
 
 // passkeyOptions answers POST /api/passkeys/options: what "Add a passkey" gives create().
 func (a *apiHandler) passkeyOptions(w http.ResponseWriter, r *http.Request, s *session.Session) {
-	if a.needsConfirmation(w, s) {
-		return
-	}
 	nonce, options, err := a.Auth.EnrolOptions(r.Context(), s.Account)
 	if a.ceremonyFailed(w, r, err) {
 		return
@@ -100,7 +109,7 @@ func (a *apiHandler) passkeyOptions(w http.ResponseWriter, r *http.Request, s *s
 // addPasskey answers POST /api/passkeys {"nonce", "credential", "prf"}: it stores the new
 // passkey with the session's password sealed under its PRF output.
 func (a *apiHandler) addPasskey(w http.ResponseWriter, r *http.Request, s *session.Session) {
-	// No confirmation check: the nonce came from passkeyOptions, which needed one, and is this
+	// Not behind withConfirmed: the nonce came from passkeyOptions, which is, and is this
 	// account's alone. Checking again would lose a passkey whose prompt ran past the window.
 	var req passkeyAnswer
 	if !decodeUpTo(w, r, &req, 64<<10) {
@@ -125,9 +134,6 @@ func (a *apiHandler) addPasskey(w http.ResponseWriter, r *http.Request, s *sessi
 // removePasskey answers POST /api/passkeys/delete {"id"} with whether "Require passkey" is
 // still on: removing the last passkey turns it off. The account's other passkey sessions end.
 func (a *apiHandler) removePasskey(w http.ResponseWriter, r *http.Request, s *session.Session) {
-	if a.needsConfirmation(w, s) {
-		return
-	}
 	var req struct {
 		ID protocol.URLEncodedBase64 `json:"id"`
 	}
@@ -148,9 +154,6 @@ func (a *apiHandler) removePasskey(w http.ResponseWriter, r *http.Request, s *se
 // requirePasskey answers PUT /api/require-passkey {"on"}. Turning it on needs a passkey and
 // ends the account's other password sessions.
 func (a *apiHandler) requirePasskey(w http.ResponseWriter, r *http.Request, s *session.Session) {
-	if a.needsConfirmation(w, s) {
-		return
-	}
 	var req struct {
 		On bool `json:"on"`
 	}

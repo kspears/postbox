@@ -74,7 +74,7 @@ test('a passkey session lasts 30 days', async ({ page, baseURL }) => {
   await expectSignInScreen(page);
 });
 
-test('ten minutes after sign-in, changing passkeys asks for the password again', async ({ page, baseURL }) => {
+test('ten minutes after sign-in, changing passkeys asks this tab for the password again', async ({ page, baseURL }) => {
   await addAuthenticator(page);
   await signIn(page, 'confirmer@example.test', seedPassword());
   await expectInbox(page);
@@ -91,7 +91,11 @@ test('ten minutes after sign-in, changing passkeys asks for the password again',
   await prompt.getByLabel('Password').fill(seedPassword());
   await prompt.getByRole('button', { name: 'Continue' }).click();
   await expect(prompt).toBeHidden();
-  // The waiting change goes ahead; the virtual authenticator may want the second prompt.
+  // Adding starts again from its button, which has the focus: browsers want a click before a
+  // passkey prompt. The virtual authenticator may want the second prompt too.
+  const add = settings.getByRole('button', { name: 'Add a passkey' });
+  await expect(add).toBeFocused();
+  await add.click();
   const listed = settings.getByRole('listitem').filter({ hasText: /^Added / });
   const finish = settings.getByRole('button', { name: 'Finish' });
   await expect(listed.or(finish)).toBeVisible();
