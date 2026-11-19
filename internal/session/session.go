@@ -43,7 +43,14 @@ type Session struct {
 	Account  string
 	Password string
 	Method   string
+	// ConfirmedUntil is until when the session may change passkeys and "Require passkey"
+	// without entering the password again.
+	ConfirmedUntil time.Time
 }
+
+// ConfirmLife is how long signing in, or entering the password again, lets a session change
+// passkeys and "Require passkey". A stolen session cookie alone cannot.
+const ConfirmLife = 10 * time.Minute
 
 // Manager creates and checks sessions.
 type Manager struct {
@@ -80,7 +87,7 @@ func (m *Manager) Create(ctx context.Context, account, password, method string, 
 		life = LongLife
 	}
 	err = m.store.CreateSession(ctx, store.Session{
-		ID: idText, Account: account, Sealed: sealed, Method: method,
+		ID: idText, Account: account, Sealed: sealed, Method: method, ConfirmedUntil: now.Add(ConfirmLife),
 		CreatedAt: now, ExpiresAt: now.Add(life),
 	})
 	if err != nil {
@@ -122,7 +129,19 @@ func (m *Manager) FromRequest(r *http.Request) (*Session, error) {
 		// The id is right but the key is not: a forged or corrupted cookie.
 		return nil, ErrNoSession
 	}
-	return &Session{ID: idText, Account: row.Account, Password: password, Method: row.Method}, nil
+	return &Session{ID: idText, Account: row.Account, Password: password, Method: row.Method, ConfirmedUntil: row.ConfirmedUntil}, nil
+}
+
+// Confirmed reports whether s may change passkeys and "Require passkey" now.
+func (m *Manager) Confirmed(s *Session) bool {
+	return m.clock.Now().Before(s.ConfirmedUntil)
+}
+
+// Confirm lets s change passkeys and "Require passkey" for ConfirmLife from now. The caller
+// has checked the password.
+func (m *Manager) Confirm(ctx context.Context, s *Session) error {
+	s.ConfirmedUntil = m.clock.Now().Add(ConfirmLife)
+	return m.store.ConfirmSession(ctx, s.ID, s.ConfirmedUntil)
 }
 
 // End signs out one session and returns a cookie that removes it from the browser.

@@ -218,3 +218,29 @@ func TestDatabaseNeverHoldsThePassword(t *testing.T) {
 		}
 	}
 }
+
+// A new session may change passkeys for ConfirmLife; after that it needs Confirm, which lasts
+// as long again and survives a reload of the session.
+func TestConfirmation(t *testing.T) {
+	m, clk, _ := newManager(t, true)
+	ctx := context.Background()
+	c, err := m.Create(ctx, "alice@example.test", password, Password, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, _ := m.FromRequest(request(c))
+	if !m.Confirmed(s) {
+		t.Error("a new session is not confirmed")
+	}
+	clk.Advance(ConfirmLife)
+	if m.Confirmed(s) {
+		t.Error("still confirmed after ConfirmLife")
+	}
+	if err := m.Confirm(ctx, s); err != nil {
+		t.Fatal(err)
+	}
+	s, _ = m.FromRequest(request(c))
+	if !m.Confirmed(s) {
+		t.Error("not confirmed after Confirm")
+	}
+}

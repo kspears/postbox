@@ -7,6 +7,7 @@ import {
   expectInbox,
   expectSignInScreen,
   fromIP,
+  openSettings,
   seedPassword,
   signIn,
 } from '../../helpers';
@@ -71,4 +72,29 @@ test('a passkey session lasts 30 days', async ({ page, baseURL }) => {
   await advanceClock(page.request, baseURL!, 60);
   await page.reload();
   await expectSignInScreen(page);
+});
+
+test('ten minutes after sign-in, changing passkeys asks for the password again', async ({ page, baseURL }) => {
+  await addAuthenticator(page);
+  await signIn(page, 'confirmer@example.test', seedPassword());
+  await expectInbox(page);
+  await advanceClock(page.request, baseURL!, 11 * 60);
+
+  const settings = await openSettings(page);
+  await settings.getByRole('button', { name: 'Add a passkey' }).click();
+  const prompt = settings.getByRole('form', { name: 'Enter your password to change passkeys.' });
+  await expect(prompt).toBeVisible();
+  await prompt.getByLabel('Password').fill('not-it');
+  await prompt.getByRole('button', { name: 'Continue' }).click();
+  await expect(prompt.getByRole('alert')).toHaveText('Wrong password.');
+
+  await prompt.getByLabel('Password').fill(seedPassword());
+  await prompt.getByRole('button', { name: 'Continue' }).click();
+  await expect(prompt).toBeHidden();
+  // The waiting change goes ahead; the virtual authenticator may want the second prompt.
+  const listed = settings.getByRole('listitem').filter({ hasText: /^Added / });
+  const finish = settings.getByRole('button', { name: 'Finish' });
+  await expect(listed.or(finish)).toBeVisible();
+  if (await finish.isVisible()) await finish.click();
+  await expect(listed).toHaveCount(1);
 });

@@ -1,6 +1,7 @@
 <script lang="ts">
   import {
     cancelled,
+    confirmPassword,
     createPasskey,
     deleteIdentity,
     passkeysSupported,
@@ -109,7 +110,8 @@
       }
       if (created === cancelled) return;
       if (!created.ok) {
-        passkeyProblem = strings.settings.passkeyFailed;
+        if (created.error === 'confirm_needed') confirmFirst(addPasskey);
+        else passkeyProblem = strings.settings.passkeyFailed;
         return;
       }
       // A provider with PRF that gave no output yet is asked once more, in a second prompt.
@@ -147,7 +149,8 @@
   async function forget(p: Passkey): Promise<void> {
     const result = await removePasskey(p.id);
     if (!result.ok) {
-      problem = strings.settings.saveFailed;
+      if (result.error === 'confirm_needed') confirmFirst(() => forget(p));
+      else problem = strings.settings.saveFailed;
       return;
     }
     passkeys = passkeys.filter((x) => x.id !== p.id);
@@ -159,7 +162,36 @@
     const result = await setRequirePasskey(on);
     if (result.ok) return;
     required = !on;
-    problem = strings.settings.saveFailed;
+    if (result.error === 'confirm_needed') confirmFirst(() => require(on));
+    else problem = strings.settings.saveFailed;
+  }
+
+  // --- the password again ---
+  // Changing passkeys needs the password entered recently; the change waits here until it is.
+  let waiting = $state<(() => Promise<void>) | null>(null);
+  let confirmText = $state('');
+  let confirmProblem = $state('');
+
+  function confirmFirst(then: () => Promise<void>): void {
+    waiting = then;
+    confirmText = '';
+    confirmProblem = '';
+  }
+
+  async function confirm(event: SubmitEvent): Promise<void> {
+    event.preventDefault();
+    const result = await confirmPassword(confirmText);
+    if (!result.ok) {
+      confirmText = '';
+      confirmProblem =
+        result.error === 'wrong_credentials'
+          ? strings.settings.wrongPassword
+          : (strings.errors[result.error as keyof typeof strings.errors] ?? strings.errors.internal);
+      return;
+    }
+    const then = waiting;
+    waiting = null;
+    await then?.();
   }
 
   const appearances = [
@@ -233,6 +265,21 @@
         {/each}
       </ul>
       {#if passkeyProblem}<p class="error-banner" role="alert">{passkeyProblem}</p>{/if}
+      {#if waiting}
+        <form class="identity" onsubmit={confirm} aria-label={strings.settings.confirm}>
+          <p class="note">{strings.settings.confirm}</p>
+          <label>
+            {strings.settings.confirmPassword}
+            <!-- svelte-ignore a11y_autofocus -->
+            <input type="password" autocomplete="current-password" required autofocus bind:value={confirmText} />
+          </label>
+          {#if confirmProblem}<p class="error-banner" role="alert">{confirmProblem}</p>{/if}
+          <div class="buttons">
+            <button type="submit" class="primary">{strings.settings.confirmContinue}</button>
+            <button type="button" onclick={() => (waiting = null)}>{strings.settings.cancel}</button>
+          </div>
+        </form>
+      {/if}
       {#if unfinished}
         <p class="note">{strings.settings.finishPasskey}</p>
         <button type="button" class="add" disabled={working} onclick={finishPasskey}>{strings.settings.finish}</button>

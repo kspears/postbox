@@ -4,6 +4,7 @@ package auth
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"log"
@@ -125,6 +126,22 @@ func (a *Authenticator) PasswordSignIn(ctx context.Context, clientIP netip.Addr,
 	}
 	if required {
 		return ErrPasskeyRequired
+	}
+	return nil
+}
+
+// ConfirmPassword checks typed against actual, the signed-in session's own password, before an
+// action that needs it entered again. No mail server is asked; a wrong password counts against
+// the throttle like a failed sign-in.
+func (a *Authenticator) ConfirmPassword(ctx context.Context, clientIP netip.Addr, account, typed, actual string) error {
+	ip := throttleKey(clientIP)
+	unlock := a.inFlight.lock(ip)
+	defer unlock()
+	if err := a.checkBlocked(ctx, account, ip); err != nil {
+		return err
+	}
+	if subtle.ConstantTimeCompare([]byte(typed), []byte(actual)) != 1 {
+		return a.fail(ctx, account, ip)
 	}
 	return nil
 }

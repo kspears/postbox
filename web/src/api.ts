@@ -15,6 +15,7 @@ const knownErrors = [
   'passkey_no_key',
   'passkey_failed',
   'passkey_required',
+  'confirm_needed',
   'internal',
 ] as const;
 export type ErrorCode = (typeof knownErrors)[number];
@@ -504,6 +505,11 @@ export async function unlockNewPasskey(p: NewPasskey): Promise<NewPasskey | type
  * server has no key to stand in. */
 export function savePasskey(p: NewPasskey): Promise<Result<Passkey>> {
   return call('POST', '/api/passkeys', { nonce: p.nonce, credential: p.credential, prf: p.prf });
+}
+
+/** Enters the password again, which lets this session change passkeys for a while. */
+export function confirmPassword(password: string): Promise<Result<void>> {
+  return call('POST', '/api/session/confirm', { password });
 }
 
 export function removePasskey(id: string): Promise<Result<{ requirePasskey: boolean }>> {

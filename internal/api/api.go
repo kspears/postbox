@@ -52,6 +52,7 @@ func NewHandler(dist fs.FS, d Deps) http.Handler {
 	mux.HandleFunc("POST /api/passkey-session/password", a.passkeyNewPassword)
 	mux.HandleFunc("DELETE /api/session", a.withSession(a.signOut(false)))
 	mux.HandleFunc("DELETE /api/sessions", a.withSession(a.signOut(true)))
+	mux.HandleFunc("POST /api/session/confirm", a.withSession(a.confirmPassword))
 	mux.HandleFunc("GET /api/folders", a.withSession(a.folders))
 	mux.HandleFunc("GET /api/conversations", a.withSession(a.conversations))
 	mux.HandleFunc("GET /api/conversation", a.withSession(a.conversation))
