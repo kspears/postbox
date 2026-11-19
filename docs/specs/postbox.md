@@ -554,9 +554,10 @@ Running it:
     shows "Can't reach the mail server." Given Dovecot is stopped while a user is signed in, the
     banner "Can't reach the mail server. Retrying…" shows, and it clears without a reload after
     Dovecot starts. Given `postbox.db` is deleted, the user's mail is unchanged after signing in
-    again. (These are automated. The review step: a person reads the storage code and confirms
-    that no key able to decrypt a stored password is written to the database, to disk, or read
-    from configuration.)
+    again. (These are automated. The review step: a person reads the storage code, following
+    `docs/storage-review.md`, and confirms that no key able to decrypt a stored password is
+    written to the database or to disk, and that the only one read from configuration is
+    `POSTBOX_PASSKEY_KEY`, used only for passkeys without PRF.)
 
 Speed, by hand. Conditions: the largest mailstack mailbox (about 10 GB), desktop Chrome on a
 home broadband connection, timed from the click to content on screen with the browser's

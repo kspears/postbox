@@ -186,12 +186,30 @@ test('Settings: appearance applies and stays; plain text makes new messages plai
   await settings.getByLabel('Dark').check();
   await settings.getByLabel('Plain text').check();
   await settings.getByRole('button', { name: 'Close' }).click();
-  await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).colorScheme)).toBe('dark');
+  // The colours themselves, not only color-scheme: a build that rewrites light-dark() to follow
+  // the system would keep color-scheme right and the page wrong.
+  const textColour = () => page.evaluate(() => getComputedStyle(document.body).color);
+  await expect.poll(textColour).toBe(darkText);
 
   await page.reload();
   await expectInbox(page);
-  await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).colorScheme)).toBe('dark');
+  await expect.poll(textColour).toBe(darkText);
   await page.getByRole('button', { name: 'Compose', exact: true }).click();
-  const body = page.getByRole('region', { name: 'New message' }).getByLabel('Message');
-  await expect(body).toHaveJSProperty('tagName', 'TEXTAREA');
+  const composer = page.getByRole('region', { name: 'New message' });
+  await expect(composer.getByLabel('Message')).toHaveJSProperty('tagName', 'TEXTAREA');
+  await composer.getByRole('button', { name: 'Discard' }).click();
+
+  // Light holds even when the system is dark.
+  await page.emulateMedia({ colorScheme: 'dark' });
+  const again = await openSettings(page);
+  await again.getByLabel('Light').check();
+  await again.getByRole('button', { name: 'Close' }).click();
+  await expect.poll(textColour).toBe(lightText);
+  await page.reload();
+  await expectInbox(page);
+  await expect.poll(textColour).toBe(lightText);
 });
+
+// --text in web/src/app.css.
+const lightText = 'rgb(27, 28, 30)';
+const darkText = 'rgb(236, 236, 236)';
