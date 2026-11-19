@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/kspears/postbox/internal/addressbook"
 	"github.com/kspears/postbox/internal/auth"
 	"github.com/kspears/postbox/internal/clock"
 	"github.com/kspears/postbox/internal/mail"
@@ -24,6 +25,8 @@ type Deps struct {
 	Watch    *mail.Watcher
 	Submit   *mail.Submitter
 	Outbox   *outbox.Outbox
+	// Addresses remembers who the person has sent mail to, for autocomplete.
+	Addresses *addressbook.Book
 	// Stopping ends when Postbox is shutting down, so open event streams can end and let it.
 	Stopping context.Context
 	Store    *store.Store
@@ -67,8 +70,13 @@ func NewHandler(dist fs.FS, d Deps) http.Handler {
 	mux.HandleFunc("POST /api/send", a.withSession(a.send))
 	mux.HandleFunc("POST /api/send/undo", a.withSession(a.undoSend))
 	mux.HandleFunc("GET /api/send", a.withSession(a.sendStatus))
+	mux.HandleFunc("GET /api/addresses", a.withSession(a.addresses))
 	mux.HandleFunc("GET /api/notices", a.withSession(a.notices))
 	mux.HandleFunc("POST /api/notices/dismiss", a.withSession(a.dismissNotice))
+	mux.HandleFunc("GET /api/settings", a.withSession(a.settings))
+	mux.HandleFunc("PUT /api/preferences", a.withSession(a.updatePreferences))
+	mux.HandleFunc("POST /api/identities", a.withSession(a.saveIdentity))
+	mux.HandleFunc("POST /api/identities/delete", a.withSession(a.deleteIdentity))
 	testRoutes(mux, a)
 	mux.Handle("/api/", http.NotFoundHandler())
 	mux.Handle("/", frontend(dist))
@@ -82,7 +90,7 @@ func securityHeaders(next http.Handler) http.Handler {
 		h := w.Header()
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Referrer-Policy", "no-referrer")
-		h.Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
+		h.Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data: blob:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 		next.ServeHTTP(w, r)
 	})
 }

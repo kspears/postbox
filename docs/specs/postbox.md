@@ -595,6 +595,13 @@ performance panel, median of five tries.
 | Undo for "Send" | Ten seconds on the server's clock, not paused; the Undo goes when the window ends, and "Sending…" stays until the outcome | The send goes ahead with the tab closed, so the window cannot wait on the page | agent default |
 | A draft opened during its send | Not opened; "This message is being sent. Use Undo to change it." | Saving it would replace the copy being sent | agent default |
 | Submission server briefly unreachable | One more try two seconds later, if none of the message had gone; then "could not be reached" and the message stays in Drafts | Rides out a restart or a dropped connection without risking a double send | agent default |
+| Quoted text in a rich-text reply or forward | The original's text, as a block quote | The original's HTML can carry remote images and styles the editor cannot hold; its text is safe to edit | agent default |
+| Images in composed mail | Only images that travel with the message (cid:); a pasted remote image is dropped | A message must not make its reader fetch something the sender chose | agent default |
+| Images in signatures | Not supported; signatures hold text, formatting and links | An image would have to travel with every message as a part | agent default |
+| Embedded images of a forwarded message | Attached as files | The forward quotes the original's text, which does not show them | agent default |
+| Identity chosen for a reply | The one in the original's To, then Cc, then the login address | The address the mail was sent to is the one to answer from | agent default |
+| A paragraph in the plain-text part of rich mail | One line | The editor makes a paragraph per press of Enter | agent default |
+| Where Settings lives | A dialog from the account menu | Settings are few; no page of their own is needed | agent default |
 | HTML part of a plain-text message | Made from the text: escaped, line breaks kept, links and quoted lines marked | Every message goes out with both parts, as criterion 21 asks, before the rich-text editor exists | agent default |
 | Reply to one's own message | Goes to the original recipients, or back to oneself when there were none | Matches other mail clients | agent default |
 | Submission port | 465 is TLS from the start; any other port must offer STARTTLS, which is used | No plaintext submission | agent default |

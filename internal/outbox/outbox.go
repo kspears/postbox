@@ -16,6 +16,7 @@ import (
 	"github.com/emersion/go-message"
 	gomail "github.com/emersion/go-message/mail"
 
+	"github.com/kspears/postbox/internal/addressbook"
 	"github.com/kspears/postbox/internal/mail"
 	"github.com/kspears/postbox/internal/store"
 )
@@ -45,18 +46,20 @@ type Outbox struct {
 	store  *store.Store
 	pool   *mail.Pool
 	submit *mail.Submitter
+	book   *addressbook.Book
 
 	mu      sync.Mutex
 	waiting map[string]*time.Timer
 }
 
 // New returns an Outbox. Messages that were in the window or being handed over when Postbox last
-// stopped are settled first (see store.SettleInterruptedSends).
-func New(ctx context.Context, st *store.Store, pool *mail.Pool, submit *mail.Submitter) (*Outbox, error) {
+// stopped are settled first (see store.SettleInterruptedSends). The people a message was sent to
+// are remembered in book.
+func New(ctx context.Context, st *store.Store, pool *mail.Pool, submit *mail.Submitter, book *addressbook.Book) (*Outbox, error) {
 	if err := st.SettleInterruptedSends(ctx); err != nil {
 		return nil, err
 	}
-	return &Outbox{store: st, pool: pool, submit: submit, waiting: map[string]*time.Timer{}}, nil
+	return &Outbox{store: st, pool: pool, submit: submit, book: book, waiting: map[string]*time.Timer{}}, nil
 }
 
 // Queue starts the undo window for the draft at draftsFolder/uid and returns the send's id. When
@@ -140,7 +143,7 @@ func (o *Outbox) deliver(ctx context.Context, id string, acct mail.Account, draf
 		log.Printf("outbox %s: read draft: %v", id, err)
 		return outcome{Failed, Unreadable, ""}
 	}
-	env, forRecipients, err := envelope(raw)
+	env, people, forRecipients, err := envelope(raw)
 	if err != nil {
 		log.Printf("outbox %s: %v", id, err)
 		return outcome{Failed, Invalid, ""}
@@ -181,6 +184,8 @@ func (o *Outbox) deliver(ctx context.Context, id string, acct mail.Account, draf
 		return outcome{Failed, Unreachable, ""}
 	}
 
+	o.book.Collect(ctx, acct.Name, people)
+
 	// Sent. The copy goes to Sent with its Bcc line, as the sender should see it.
 	if err := o.pool.Do(ctx, acct, func(c *mail.Conn) error { return c.FileSent(raw) }); err != nil {
 		log.Printf("outbox %s: file in Sent: %v", id, err)
@@ -192,18 +197,19 @@ func (o *Outbox) deliver(ctx context.Context, id string, acct mail.Account, draf
 	return outcome{Sent, "", ""}
 }
 
-// envelope reads who a saved message is from and to, and returns the copy the recipients get:
-// the same message without its Bcc line.
-func envelope(raw []byte) (mail.Envelope, []byte, error) {
+// envelope reads who a saved message is from and to, with the recipients' display names, and
+// returns the copy the recipients get: the same message without its Bcc line.
+func envelope(raw []byte) (mail.Envelope, []store.Address, []byte, error) {
+	var env mail.Envelope
 	entity, err := message.Read(bytes.NewReader(raw))
 	if err != nil && !message.IsUnknownCharset(err) && !message.IsUnknownEncoding(err) {
-		return mail.Envelope{}, nil, err
+		return env, nil, nil, err
 	}
 	h := gomail.Header{Header: entity.Header}
-	var env mail.Envelope
 	if from, err := h.AddressList("From"); err == nil && len(from) == 1 {
 		env.From = from[0].Address
 	}
+	var people []store.Address
 	seen := map[string]bool{}
 	for _, key := range []string{"To", "Cc", "Bcc"} {
 		addrs, _ := h.AddressList(key)
@@ -211,16 +217,17 @@ func envelope(raw []byte) (mail.Envelope, []byte, error) {
 			if k := strings.ToLower(a.Address); !seen[k] {
 				seen[k] = true
 				env.To = append(env.To, a.Address)
+				people = append(people, store.Address{Name: a.Name, Email: a.Address})
 			}
 		}
 	}
 	if env.From == "" {
-		return env, nil, errors.New("the message has no sender")
+		return env, nil, nil, errors.New("the message has no sender")
 	}
 	if len(env.To) == 0 {
-		return env, nil, errors.New("the message has no recipients")
+		return env, nil, nil, errors.New("the message has no recipients")
 	}
-	return env, withoutBcc(raw), nil
+	return env, people, withoutBcc(raw), nil
 }
 
 // withoutBcc removes the Bcc header (and its folded lines) from a message's top header.

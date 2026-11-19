@@ -124,8 +124,9 @@ func people(h gomail.Header, key string) []Person {
 	return out
 }
 
-// FromDraft turns a saved draft back into the composer's content. Its text is what the
-// composer edits; the HTML part Postbox wrote alongside is made again from it on the next save.
+// FromDraft turns a saved draft back into the composer's content. A draft written as plain text
+// comes back without HTML (its HTML part was made from the text); one written as rich text, or
+// in another mail app, keeps its HTML body for the rich-text editor.
 func FromDraft(raw []byte, folder string, uid uint32) (*Draft, error) {
 	o, err := Parse(raw, folder, uid)
 	if err != nil {
@@ -138,5 +139,24 @@ func FromDraft(raw []byte, folder string, uid uint32) (*Draft, error) {
 	if len(o.From) > 0 {
 		d.From = o.From[0]
 	}
+	if body := innerBody(o.HTML); body != "" && body != TextToHTML(o.Text) {
+		d.HTML = body
+	}
 	return d, nil
+}
+
+// innerBody is what is between <body> and </body>, or the whole when there is no body element.
+func innerBody(doc string) string {
+	lower := strings.ToLower(doc)
+	start := strings.Index(lower, "<body")
+	if start >= 0 {
+		if end := strings.Index(lower[start:], ">"); end >= 0 {
+			start += end + 1
+		}
+	}
+	end := strings.LastIndex(lower, "</body>")
+	if start < 0 || end < start {
+		return doc
+	}
+	return doc[start:end]
 }

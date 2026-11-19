@@ -131,7 +131,7 @@ func TestRespond(t *testing.T) {
 		Text:        "Shall we?\n> earlier",
 		Attachments: []Attachment{{Folder: "INBOX", UID: 4, Part: "2", Name: "map.pdf"}},
 	}
-	r := Respond(o, ModeReply, me)
+	r := Respond(o, ModeReply, []Person{me})
 	if r.Subject != "Re: Plans" || len(r.To) != 1 || r.To[0].Email != "bob@example.test" || len(r.Cc) != 0 || len(r.Attachments) != 0 {
 		t.Errorf("reply %+v", r)
 	}
@@ -142,7 +142,7 @@ func TestRespond(t *testing.T) {
 		t.Errorf("quote %q", r.Text)
 	}
 
-	all := Respond(o, ModeReplyAll, me)
+	all := Respond(o, ModeReplyAll, []Person{me})
 	var to, cc []string
 	for _, p := range all.To {
 		to = append(to, p.Email)
@@ -154,11 +154,11 @@ func TestRespond(t *testing.T) {
 		t.Errorf("reply all to %v cc %v", to, cc)
 	}
 
-	f := Respond(o, ModeForward, me)
+	f := Respond(o, ModeForward, []Person{me})
 	if f.Subject != "Fwd: Plans" || len(f.To) != 0 || len(f.Attachments) != 1 || !strings.Contains(f.Text, "---------- Forwarded message ----------") {
 		t.Errorf("forward %+v", f)
 	}
-	if Respond(&Original{Subject: "re: x", From: []Person{me}, To: []Person{{Email: "b@example.test"}}}, ModeReply, me).To[0].Email != "b@example.test" {
+	if Respond(&Original{Subject: "re: x", From: []Person{me}, To: []Person{{Email: "b@example.test"}}}, ModeReply, []Person{me}).To[0].Email != "b@example.test" {
 		t.Error("a reply to one's own message did not go to its recipients")
 	}
 }
@@ -173,5 +173,88 @@ func TestBuildKeepsHeaderValuesOnOneLine(t *testing.T) {
 	o, err := Parse(raw, "Drafts", 1)
 	if err != nil || len(o.Attachments) != 1 || o.Attachments[0].Name != "a b.txt" {
 		t.Errorf("got %+v, %v", o, err)
+	}
+}
+
+func TestHTMLToText(t *testing.T) {
+	for in, want := range map[string]string{
+		`<p>Hello <b>there</b></p><p></p><p>Second</p>`:                                                      "Hello there\n\nSecond",
+		`<p>On Mon, Bob wrote:</p><blockquote>Shall we?<br>Yes<blockquote>earlier</blockquote></blockquote>`: "On Mon, Bob wrote:\n> Shall we?\n> Yes\n> > earlier",
+		`<ul><li><p>one</p></li><li><p>two</p></li></ul><ol><li>a</li><li>b</li></ol>`:                       "- one\n- two\n1. a\n2. b",
+		`<p>see <a href="https://x.org">site</a>, <a href="https://y.org">https://y.org</a></p>`:             "see site <https://x.org>, https://y.org",
+		`<p>Hello there <a href="https://x.test">foo<br>b</a></p>`:                                           "Hello there foo\nb <https://x.test>",
+	} {
+		if got := HTMLToText(in); got != want {
+			t.Errorf("HTMLToText(%s)\n got  %q\n want %q", in, got, want)
+		}
+	}
+}
+
+func TestRichDraft(t *testing.T) {
+	d := draft()
+	d.Text = "ignored"
+	d.HTML = `<p>Hi <b>Bob</b></p><div data-signature=""><p>Alice</p></div><script>x()</script><img src="https://tracker.example/p.gif">`
+	raw, err := Build(d, when, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := FromDraft(raw, "Drafts", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.HTML != `<p>Hi <b>Bob</b></p><div data-signature=""><p>Alice</p></div>` {
+		t.Errorf("html %q", got.HTML)
+	}
+	if strings.TrimSpace(got.Text) != "Hi Bob\nAlice" {
+		t.Errorf("text %q", got.Text)
+	}
+}
+
+func TestRespondFromTheIdentityAddressed(t *testing.T) {
+	ids := []Person{{Email: "alice@example.test"}, {Name: "Sales", Email: "sales@example.test"}}
+	o := &Original{
+		From: []Person{{Email: "bob@example.test"}}, To: []Person{{Email: "Sales@example.test"}},
+		Cc: []Person{{Email: "alice@example.test"}, {Email: "carol@example.test"}}, Subject: "Order", Text: "Line one\nLine two",
+	}
+	r := Respond(o, ModeReplyAll, ids)
+	if r.From.Email != "sales@example.test" || len(r.To) != 1 || len(r.Cc) != 1 || r.Cc[0].Email != "carol@example.test" {
+		t.Errorf("reply all %+v", r)
+	}
+	if !strings.Contains(r.HTML, "<blockquote>Line one<br>Line two<br></blockquote>") {
+		t.Errorf("quote html %q", r.HTML)
+	}
+	if Respond(&Original{From: []Person{{Email: "bob@example.test"}}}, ModeReply, ids).From.Email != "alice@example.test" {
+		t.Error("a reply to mail sent to no identity is not from the login address")
+	}
+}
+
+func TestInlineImageIsAnInlinePart(t *testing.T) {
+	d := draft()
+	d.HTML = `<p>Look</p><img src="cid:dot@postbox">`
+	d.Attachments = append(d.Attachments, Attachment{Name: "dot.png", Type: "image/png", Data: []byte("png"), Inline: true, ContentID: "dot@postbox"})
+	raw, err := Build(d, when, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(raw, []byte("Content-Id: <dot@postbox>")) {
+		t.Errorf("no Content-ID:\n%s", raw)
+	}
+	o, err := Parse(raw, "Drafts", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The image sits with the HTML in a related part; the file follows it.
+	if len(o.Attachments) != 2 || !o.Attachments[0].Inline || o.Attachments[0].ContentID != "dot@postbox" || o.Attachments[0].Name != "dot.png" || o.Attachments[0].Part != "1.2" || o.Attachments[1].Part != "2" {
+		t.Errorf("attachments %+v", o.Attachments)
+	}
+	if !bytes.Contains(raw, []byte("multipart/related")) {
+		t.Errorf("no related part:\n%s", raw)
+	}
+	saved := Saved(d, "Drafts", 1)
+	if saved[0].Part != "2" || saved[1].Part != "1.2" {
+		t.Errorf("Saved gives parts %q and %q, the message has 2 and 1.2", saved[0].Part, saved[1].Part)
+	}
+	if bytes.Contains(raw, []byte("attachment; filename=dot.png")) {
+		t.Error("the image is an attachment")
 	}
 }

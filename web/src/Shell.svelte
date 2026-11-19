@@ -23,7 +23,10 @@
     type Destination,
     type ErrorCode,
     type Folder,
+    type Identity,
     type Message,
+    type Preferences,
+    settings as fetchSettings,
   } from './api';
   import { untrack } from 'svelte';
   import { SvelteMap, SvelteSet } from 'svelte/reactivity';
@@ -33,6 +36,8 @@
   import ConversationView from './ConversationView.svelte';
   import Dialog from './Dialog.svelte';
   import FolderList from './FolderList.svelte';
+  import { applyAppearance } from './appearance';
+  import Settings from './Settings.svelte';
   import UndoNotice, { type Notice } from './UndoNotice.svelte';
   import { closeConversation, openConversation, openFolder, route } from './route.svelte';
   import { strings } from './strings';
@@ -66,6 +71,25 @@
   let listLoaded = $state(false);
   // Bumped whenever the open folder changes, so answers for the old one are dropped.
   let generation = 0;
+
+  // --- settings ---
+  let preferences = $state<Preferences>({ appearance: 'system', composer: 'rich' });
+  let identities = $state<Identity[]>([]);
+  let settingsOpen = $state(false);
+
+  $effect(() => {
+    fetchSettings().then((result) => {
+      if (!result.ok) return;
+      setPreferences(result.value.preferences);
+      identities = result.value.identities;
+    });
+  });
+
+  // Applied only as loaded or chosen: the default would undo the appearance restored at start.
+  function setPreferences(p: Preferences): void {
+    preferences = p;
+    applyAppearance(p.appearance);
+  }
 
   // --- writing ---
   // problem: why the last attempt to send this message failed.
@@ -621,6 +645,14 @@
       </button>
       {#if menuOpen}
         <div class="menu" role="menu">
+          <button
+            type="button"
+            role="menuitem"
+            onclick={() => {
+              menuOpen = false;
+              settingsOpen = true;
+            }}>{strings.account.settings}</button
+          >
           <button type="button" role="menuitem" onclick={() => leave(false)}>{strings.account.signOut}</button>
           <button type="button" role="menuitem" onclick={() => leave(true)}>{strings.account.signOutEverywhere}</button>
         </div>
@@ -756,12 +788,24 @@
   {#key composing}
     <Composer
       view={composing.view}
+      {preferences}
       problem={composing.problem}
       onSent={sent}
       onClose={composerClosed}
       onError={failed}
     />
   {/key}
+{/if}
+
+{#if settingsOpen}
+  <Settings
+    account={account.account}
+    {preferences}
+    {identities}
+    onPreferences={setPreferences}
+    onIdentities={(list) => (identities = list)}
+    onClose={() => (settingsOpen = false)}
+  />
 {/if}
 
 {#if notice}

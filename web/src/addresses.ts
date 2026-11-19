@@ -20,7 +20,7 @@ export function parseAddresses(text: string): { ok: true; people: Person[] } | {
 }
 
 /** Splits on commas and semicolons outside quotes and angle brackets. */
-function splitList(text: string): string[] {
+export function splitList(text: string): string[] {
   const out: string[] = [];
   let current = '';
   let quoted = false;
