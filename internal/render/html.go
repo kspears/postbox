@@ -20,6 +20,11 @@ type Options struct {
 	Inline map[string]string
 }
 
+// The most embedded-image data one body may carry once rendered. Every reference to an image
+// repeats it, so without a limit a small message referring to one image many times would need
+// gigabytes.
+const maxInlineOutput = 24 << 20
+
 // Result is a rendered body.
 type Result struct {
 	HTML string // a fragment for <body>
@@ -60,8 +65,6 @@ func newPolicy() *bluemonday.Policy {
 	})
 	p.RequireParseableURLs(true)
 	p.AllowRelativeURLs(false)
-	p.RequireNoReferrerOnLinks(true)
-	p.AddTargetBlankToFullyQualifiedLinks(true)
 	// The text of these is never message content, so it is dropped with the element.
 	p.SkipElementsContent("script", "style", "title", "head", "noscript", "template", "textarea", "xmp", "iframe", "object", "svg", "math")
 	return p
@@ -109,6 +112,7 @@ func styleBlocks(doc string) string {
 // (when allowed), or go.
 func rewrite(fragment string, opts Options, blocked *int) string {
 	var b strings.Builder
+	budget := maxInlineOutput
 	z := nethtml.NewTokenizer(strings.NewReader(fragment))
 	for {
 		tt := z.Next()
@@ -117,13 +121,13 @@ func rewrite(fragment string, opts Options, blocked *int) string {
 		}
 		t := z.Token()
 		if tt == nethtml.StartTagToken || tt == nethtml.SelfClosingTagToken {
-			t.Attr = rewriteAttrs(t, opts, blocked)
+			t.Attr = rewriteAttrs(t, opts, blocked, &budget)
 		}
 		b.WriteString(t.String())
 	}
 }
 
-func rewriteAttrs(t nethtml.Token, opts Options, blocked *int) []nethtml.Attribute {
+func rewriteAttrs(t nethtml.Token, opts Options, blocked *int, budget *int) []nethtml.Attribute {
 	out := t.Attr[:0]
 	for _, a := range t.Attr {
 		switch {
@@ -133,7 +137,7 @@ func rewriteAttrs(t nethtml.Token, opts Options, blocked *int) []nethtml.Attribu
 				continue
 			}
 		case t.DataAtom == atom.Img && a.Key == "src":
-			src, ok := imageSource(a.Val, opts)
+			src, ok := imageSource(a.Val, opts, budget)
 			if !ok {
 				if strings.HasPrefix(strings.ToLower(a.Val), "http") {
 					*blocked++
@@ -154,7 +158,7 @@ func rewriteAttrs(t nethtml.Token, opts Options, blocked *int) []nethtml.Attribu
 	return out
 }
 
-func imageSource(src string, opts Options) (string, bool) {
+func imageSource(src string, opts Options, budget *int) (string, bool) {
 	u, err := url.Parse(strings.TrimSpace(src))
 	if err != nil {
 		return "", false
@@ -166,7 +170,11 @@ func imageSource(src string, opts Options) (string, bool) {
 			id = decoded
 		}
 		data, ok := opts.Inline[id]
-		return data, ok
+		if !ok || len(data) > *budget {
+			return "", false
+		}
+		*budget -= len(data)
+		return data, true
 	case "data":
 		return src, dataImage.MatchString(u.Opaque)
 	case "http", "https":

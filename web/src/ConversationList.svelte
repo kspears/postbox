@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Conversation } from './api';
+  import { path } from './route.svelte';
   import { strings } from './strings';
 
   interface Props {
@@ -66,7 +67,7 @@
       <li class:unread={c.unread} class:selected={c.id === selected}>
         <a
           class="row"
-          href={`/folder/${encodeURIComponent(folder)}/${c.id}`}
+          href={path({ folder, conversation: c.id })}
           aria-current={c.id === selected ? 'true' : undefined}
           onclick={(e) => open(e, c.id)}
         >

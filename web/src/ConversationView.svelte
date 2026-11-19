@@ -10,18 +10,29 @@
     onBack: () => void;
     onRead: (id: number) => void;
     onError: (error: ErrorCode) => void;
+    // Changes when the conversation's row in the list changes, so it is fetched again.
+    refresh: string;
   }
-  const { account, folder, id, onBack, onRead, onError }: Props = $props();
+  const { account, folder, id, onBack, onRead, onError, refresh }: Props = $props();
 
   let messages = $state<Message[]>([]);
   let gone = $state(false);
   let allowedSenders = $state<string[]>([]);
 
+  let shown = '';
+
   $effect(() => {
     const want = { folder, id };
+    void refresh;
     let current = true;
-    messages = [];
-    gone = false;
+    // A different conversation starts empty; the same one fetched again keeps what is on
+    // screen until the new copy arrives.
+    const key = `${want.folder}\n${want.id}`;
+    if (key !== shown) {
+      messages = [];
+      gone = false;
+      shown = key;
+    }
     conversation(want.folder, want.id).then(async (result) => {
       if (!current) return;
       if (!result.ok) {
@@ -75,7 +86,7 @@
       <article aria-label={`${name(m.from[0] ?? { name: '', email: '' })}, ${long.format(new Date(m.date))}`}>
         <header>
           <div class="from">
-            <strong>{m.from.map(name).join(', ')}</strong>
+            <strong>{names(m.from)}</strong>
             {#if m.from[0] && m.from[0].email !== account && m.from[0].name}
               <span class="email">&lt;{m.from[0].email}&gt;</span>
             {/if}

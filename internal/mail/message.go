@@ -74,6 +74,8 @@ func plan(bs imap.BodyStructure) layout {
 	}
 	_, multi := bs.(*imap.BodyStructureMultiPart)
 	var text, html *partAt
+	var texts []partAt // every text part not marked as an attachment
+	images := map[string]partAt{}
 	bs.Walk(func(path []int, s imap.BodyStructure) bool {
 		single, ok := s.(*imap.BodyStructureSinglePart)
 		if !ok {
@@ -89,12 +91,16 @@ func plan(bs imap.BodyStructure) layout {
 		case isAttachment(single):
 			l.attachments = append(l.attachments, attachmentOf(p, "attachment"))
 		case id != "" && bitmap[mediaType]:
-			l.inline[id] = p
-		case mediaType == "text/html" && html == nil:
-			html = &p
-		case mediaType == "text/plain" && text == nil:
-			text = &p
-		case mediaType != "text/plain" && mediaType != "text/html":
+			images[id] = p
+		case mediaType == "text/html" || mediaType == "text/plain":
+			texts = append(texts, p)
+			if mediaType == "text/html" && html == nil {
+				html = &texts[len(texts)-1]
+			}
+			if mediaType == "text/plain" && text == nil {
+				text = &texts[len(texts)-1]
+			}
+		default:
 			// Calendars, CSV files and anything else not meant as the message itself.
 			l.attachments = append(l.attachments, attachmentOf(p, "attachment"))
 		}
@@ -107,6 +113,23 @@ func plan(bs imap.BodyStructure) layout {
 			l.body = nil
 		}
 	}
+	// Nothing in the message may be neither shown nor offered: the other text parts (beyond
+	// the plain version of the HTML one) and, when the body is plain text and cannot show them,
+	// the embedded images are listed as attachments.
+	for _, t := range texts {
+		alternative := html != nil && text != nil && t.part == text.part
+		if (chosen == nil || t.part != chosen.part) && !alternative {
+			l.attachments = append(l.attachments, attachmentOf(t, "text.txt"))
+		}
+	}
+	for id, p := range images {
+		if html != nil {
+			l.inline[id] = p
+		} else {
+			l.attachments = append(l.attachments, attachmentOf(p, "image"))
+		}
+	}
+	slices.SortFunc(l.attachments, func(a, b Attachment) int { return strings.Compare(a.Part, b.Part) })
 	return l
 }
 

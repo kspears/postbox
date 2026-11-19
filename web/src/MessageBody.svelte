@@ -14,6 +14,7 @@
   let height = $state(80);
   let blocked = $state(0);
   let loadOnce = $state(false);
+  let failed = $state(false);
 
   // The body comes from its own address, so the frame never inherits the app's page, and its
   // response carries a policy that stops every request but inline images. The sandbox lets
@@ -21,23 +22,34 @@
   // which only works because the frame shares the app's origin; scripts stay off.
   const src = $derived(message.body && (loadOnce || senderAllowed) && !message.imagesAllowed ? withImages(message.body) : message.body);
 
+  // Images and fonts arrive after load and change the height. A message cannot make its own
+  // height depend on the frame's (viewport units are filtered out and the body's height is
+  // fixed to its content), but if one finds a way, resizing stops after a while.
+  let resizes = 0;
+  let observer: ResizeObserver | undefined;
+
   function measure(): void {
     const doc = frame?.contentDocument;
     if (!doc?.documentElement) return;
     height = Math.max(40, doc.documentElement.scrollHeight);
+    if (++resizes > 50) observer?.disconnect();
   }
 
   function loaded(): void {
+    observer?.disconnect();
+    resizes = 0;
     const doc = frame?.contentDocument;
-    if (!doc) return;
-    const meta = doc.querySelector('meta[name="postbox-remote-images"]');
-    blocked = Number(meta?.getAttribute('content') ?? 0) || 0;
+    const meta = doc?.querySelector('meta[name="postbox-remote-images"]');
+    // Only a rendered body carries the meta element; an error answer does not.
+    failed = !meta;
+    if (!doc || !meta) return;
+    blocked = Number(meta.getAttribute('content')) || 0;
     measure();
-    // Images and fonts arrive after load and change the height.
-    const observer = new ResizeObserver(measure);
+    observer = new ResizeObserver(measure);
     if (doc.body) observer.observe(doc.body);
-    frame?.addEventListener('load', () => observer.disconnect(), { once: true });
   }
+
+  $effect(() => () => observer?.disconnect());
 
   async function always(): Promise<void> {
     if (!message.sender) return;
@@ -56,8 +68,12 @@
   </div>
 {/if}
 
+{#if failed}
+  <p class="note">{strings.reading.failed}</p>
+{/if}
 {#if src}
   <iframe
+    hidden={failed}
     bind:this={frame}
     {src}
     title={message.subject}

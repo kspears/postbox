@@ -5,6 +5,7 @@ package render
 import (
 	"bytes"
 	"io"
+	"regexp"
 	"strings"
 
 	"github.com/tdewolff/parse/v2"
@@ -42,6 +43,8 @@ func init() {
 	}
 }
 
+var viewportUnit = regexp.MustCompile(`(?i)[0-9.](s|l|d)?v(h|w|i|b|min|max)$`)
+
 // Functions a value may use. None of them can fetch anything; every other function (url,
 // image-set, expression, element, paint and whatever comes next) drops the declaration.
 var allowedFunctions = map[string]bool{}
@@ -60,6 +63,12 @@ func safeValue(values []css.Token) bool {
 		switch v.TokenType {
 		case css.URLToken, css.BadURLToken, css.BadStringToken:
 			return false
+		case css.DimensionToken:
+			// Lengths relative to the viewport would track the frame, which is sized to fit the
+			// message: each would grow the other without end.
+			if viewportUnit.Match(v.Data) {
+				return false
+			}
 		case css.LeftParenthesisToken:
 			// A bracket not opened by an allowed function: "url/**/(…)" and its relatives.
 			return false
@@ -89,8 +98,8 @@ func FilterStyleSheet(sheet string) string {
 	p := css.NewParser(parse.NewInputString(sheet), false)
 	var b strings.Builder
 	var selector strings.Builder
-	skip := 0       // depth inside an at-rule that is being dropped
-	var kept []bool // for each open block: whether its braces were written
+	skip := 0 // depth inside an at-rule or rule that is being dropped
+	open := 0 // blocks whose opening brace was written
 	for {
 		gt, _, data := p.Next()
 		if gt == css.ErrorGrammar {
@@ -108,14 +117,14 @@ func FilterStyleSheet(sheet string) string {
 			b.WriteString("@media")
 			writeTokens(&b, p.Values())
 			b.WriteString("{")
-			kept = append(kept, true)
-		case css.EndAtRuleGrammar:
+			open++
+		case css.EndAtRuleGrammar, css.EndRulesetGrammar:
 			if skip > 0 {
 				skip--
 				continue
 			}
-			if len(kept) > 0 {
-				kept = kept[:len(kept)-1]
+			if open > 0 {
+				open--
 				b.WriteString("}")
 			}
 		case css.QualifiedRuleGrammar:
@@ -134,16 +143,7 @@ func FilterStyleSheet(sheet string) string {
 			b.WriteString(selector.String())
 			selector.Reset()
 			b.WriteString("{")
-			kept = append(kept, true)
-		case css.EndRulesetGrammar:
-			if skip > 0 {
-				skip--
-				continue
-			}
-			if len(kept) > 0 {
-				kept = kept[:len(kept)-1]
-				b.WriteString("}")
-			}
+			open++
 		case css.DeclarationGrammar:
 			if skip == 0 {
 				writeDeclaration(&b, data, p.Values())

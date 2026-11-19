@@ -45,6 +45,10 @@
   // Bumped whenever the open folder changes, so answers for the old one are dropped.
   let generation = 0;
 
+  // The open conversation's row: when a refresh changes it (a reply arrived, a message
+  // went), the conversation is fetched again.
+  const openRow = $derived(rows.find((r) => r.id === route.conversation));
+  const openRowState = $derived(openRow ? `${openRow.date} ${openRow.count}` : '');
   const currentFolder = $derived(folderList.find((f) => f.name === route.folder));
 
   // Deals with a failed load and returns what to show for it, if anything.
@@ -152,6 +156,7 @@
       loadFolders(true);
       if (route.folder === 'INBOX') refreshList();
     });
+    events.addEventListener('signed_out', () => onSignedOut());
     events.addEventListener('unreachable', () => (pushDown = true));
     events.addEventListener('reachable', () => {
       pushDown = false;
@@ -270,6 +275,7 @@
         onBack={closeConversation}
         onRead={markedRead}
         onError={(e) => (listFailure = handle(e))}
+        refresh={openRowState}
       />
     {:else}
       <section class="empty" aria-label="Reading pane">
@@ -368,7 +374,6 @@
       display: none !important;
     }
 
-    .panes[data-view='folders'] > :global(nav),
     .panes[data-view='list'] > .middle,
     .panes[data-view='reading'] > :global(.reading) {
       display: grid !important;

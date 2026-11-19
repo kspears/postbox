@@ -106,6 +106,11 @@ func (w *Watcher) send(h *hub, e Event) {
 		}
 		h.down = false
 	}
+	h.tell(e)
+}
+
+// tell offers e to every subscriber without waiting; w.mu must be held.
+func (h *hub) tell(e Event) {
 	for ch := range h.subs {
 		select {
 		case ch <- e:
@@ -118,11 +123,8 @@ func (w *Watcher) send(h *hub, e Event) {
 func (w *Watcher) end(key hubKey, h *hub, e Event) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	h.tell(e)
 	for ch := range h.subs {
-		select {
-		case ch <- e:
-		default:
-		}
 		close(ch)
 		delete(h.subs, ch)
 	}
@@ -144,6 +146,11 @@ func (w *Watcher) run(ctx context.Context, key hubKey, h *hub, acct Account) {
 		case err != nil:
 			log.Printf("watch %s: %v", acct.Name, err)
 			w.send(h, EventUnreachable)
+		default:
+			// A planned fresh login: no pause, and news that came in between the two
+			// connections is announced, since neither of them saw it.
+			w.send(h, EventInbox)
+			continue
 		}
 		select {
 		case <-ctx.Done():
@@ -180,8 +187,14 @@ func (w *Watcher) watch(ctx context.Context, h *hub, acct Account) error {
 	}
 	// Back after an outage: whatever happened meanwhile is news.
 	w.send(h, EventReachable)
+	// Dovecot keeps a logged-in connection working after a password change, so the watcher
+	// logs in again now and then, as the pool does, to find out.
+	relogin := time.Now().Add(maxAge)
 
 	for {
+		if time.Now().After(relogin) {
+			return nil
+		}
 		idle, err := c.Idle()
 		if err != nil {
 			return err
@@ -208,7 +221,11 @@ func (w *Watcher) watch(ctx context.Context, h *hub, acct Account) error {
 		}
 		if news {
 			// Let a burst of changes (a delivery, then its flags) arrive before telling anyone.
-			time.Sleep(200 * time.Millisecond)
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-time.After(200 * time.Millisecond):
+			}
 			select {
 			case <-changed:
 			default:

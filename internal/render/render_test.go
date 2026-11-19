@@ -109,6 +109,25 @@ func TestKeepsOrdinaryFormatting(t *testing.T) {
 	}
 }
 
+func TestRepeatedEmbeddedImagesStayWithinBudget(t *testing.T) {
+	image := "data:image/png;base64," + strings.Repeat("A", 1<<20)
+	doc := strings.Repeat(`<img src="cid:a">`, 100)
+	got := HTML(doc, Options{Inline: map[string]string{"a": image}}).HTML
+	if len(got) > maxInlineOutput+len(doc) {
+		t.Errorf("rendered %d bytes for one 1 MiB image referred to 100 times", len(got))
+	}
+	if strings.Count(got, image) == 0 {
+		t.Error("the image was not shown at all")
+	}
+}
+
+func TestViewportUnitsAreDropped(t *testing.T) {
+	got := FilterInlineStyle(`min-height: 100vh; height: 50dvh; width: 10vmax; margin: 4px; padding: 2em`)
+	if got != "margin:4px;padding:2em;" {
+		t.Errorf("got %q", got)
+	}
+}
+
 func TestText(t *testing.T) {
 	got := Text("Hi <you>,\nsee https://example.org/a?b=1&c=2.\n").HTML
 	want := `<div class="postbox-plain">Hi &lt;you&gt;,` + "\n" + `see <a href="https://example.org/a?b=1&amp;c=2" target="_blank" rel="noopener noreferrer">https://example.org/a?b=1&amp;c=2</a>.` + "\n" + `</div>`

@@ -20,7 +20,7 @@ function parse(path: string): Route {
   }
 }
 
-function path(r: Route): string {
+export function path(r: Route): string {
   return prefix + encodeURIComponent(r.folder) + (r.conversation ? `/${r.conversation}` : '');
 }
 

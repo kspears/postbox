@@ -53,6 +53,7 @@ export const strings = {
     to: 'To',
     cc: 'Cc',
     noContent: 'This message has no content.',
+    failed: "This message couldn't be loaded.",
     gone: 'This conversation is no longer in this folder.',
     remoteBlocked: 'Remote images are blocked.',
     loadImages: 'Load images',

@@ -2,11 +2,11 @@ package api
 
 import (
 	"encoding/json"
-	"errors"
 	"html/template"
 	"mime"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -52,35 +52,20 @@ func (a *apiHandler) conversation(w http.ResponseWriter, r *http.Request, s *ses
 		return
 	}
 	var msgs []mail.Message
-	var gone bool
 	if !a.withMail(w, r, s, func(c *mail.Conn) error {
-		folders, err := c.Folders()
+		sent, err := c.SentFolder()
 		if err != nil {
 			return err
 		}
-		sent := ""
-		for _, f := range folders {
-			if f.Role == mail.RoleSent {
-				sent = f.Name
-			}
-		}
 		msgs, err = c.Conversation(folder, id, sent)
-		if errors.Is(err, mail.ErrNotFound) || mail.IsMissingFolder(err) {
-			gone = true
-			return nil
-		}
 		return err
 	}) {
-		return
-	}
-	if gone {
-		writeError(w, http.StatusNotFound, errNotFound)
 		return
 	}
 
 	var senders []string
 	for _, m := range msgs {
-		if len(m.From) > 0 {
+		if len(m.From) > 0 && !slices.Contains(senders, m.From[0].Email) {
 			senders = append(senders, m.From[0].Email)
 		}
 	}
@@ -118,6 +103,7 @@ table{max-width:100%}
 .postbox-plain{white-space:pre-wrap;font:inherit}
 </style>
 <style>{{.CSS}}</style>
+<style>html,body{height:auto!important;min-height:0!important;max-height:none!important;position:static!important}</style>
 </head><body>{{.HTML}}</body></html>
 `))
 
@@ -131,20 +117,13 @@ func (a *apiHandler) body(w http.ResponseWriter, r *http.Request, s *session.Ses
 		return
 	}
 	images := r.URL.Query().Get("images") == "1"
+	// An error answer is shown in the reading pane's frame too, which must be allowed to hold it.
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'self'; sandbox allow-same-origin")
 	var res render.Result
-	var gone bool
 	if !a.withMail(w, r, s, func(c *mail.Conn) (err error) {
 		res, err = c.Body(folder, uid, images)
-		if errors.Is(err, mail.ErrNotFound) || mail.IsMissingFolder(err) {
-			gone = true
-			return nil
-		}
 		return err
 	}) {
-		return
-	}
-	if gone {
-		writeError(w, http.StatusNotFound, errNotFound)
 		return
 	}
 
@@ -155,7 +134,9 @@ func (a *apiHandler) body(w http.ResponseWriter, r *http.Request, s *session.Ses
 		imgSrc += " http: https:"
 	}
 	h := w.Header()
-	h.Set("Content-Security-Policy", "default-src 'none'; img-src "+imgSrc+"; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'")
+	// sandbox repeats the frame's own: opened on its own (from a link in another message) the
+	// body still runs nothing. allow-same-origin keeps it readable by the app's frame code.
+	h.Set("Content-Security-Policy", "default-src 'none'; img-src "+imgSrc+"; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'; sandbox allow-same-origin allow-popups allow-popups-to-escape-sandbox")
 	h.Set("Referrer-Policy", "no-referrer")
 	h.Set("X-DNS-Prefetch-Control", "off")
 	h.Set("Cache-Control", "private, no-store")
@@ -178,8 +159,7 @@ func (a *apiHandler) attachment(w http.ResponseWriter, r *http.Request, s *sessi
 		return
 	}
 	started := false
-	var gone bool
-	ok = a.withMail(w, r, s, func(c *mail.Conn) error {
+	a.withStream(w, r, s, func(c *mail.Conn) error {
 		err := c.Attachment(folder, uid, part, func(att mail.Attachment) {
 			started = true
 			h := w.Header()
@@ -188,19 +168,12 @@ func (a *apiHandler) attachment(w http.ResponseWriter, r *http.Request, s *sessi
 			h.Set("Content-Security-Policy", "default-src 'none'; sandbox")
 			h.Set("Cache-Control", "private, no-store")
 		}, w)
-		if !started && (errors.Is(err, mail.ErrNotFound) || mail.IsMissingFolder(err)) {
-			gone = true
-			return nil
-		}
 		if started && err != nil {
 			// Headers are gone already; the browser sees a cut-off download.
 			return nil
 		}
 		return err
 	})
-	if ok && gone {
-		writeError(w, http.StatusNotFound, errNotFound)
-	}
 }
 
 func validPart(p string) bool {

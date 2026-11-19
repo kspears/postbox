@@ -33,8 +33,7 @@ func (a *apiHandler) events(w http.ResponseWriter, r *http.Request, s *session.S
 	stop := context.AfterFunc(a.Stopping, cancel)
 	defer stop()
 
-	acct := mail.Account{ClientIP: a.clientIP(r), Name: s.Account, Password: s.Password}
-	ch := a.Watch.Subscribe(ctx, acct)
+	ch := a.Watch.Subscribe(ctx, a.account(r, s))
 	// A comment now and then keeps proxies from closing a quiet stream.
 	ping := time.NewTicker(25 * time.Second)
 	defer ping.Stop()
@@ -43,6 +42,13 @@ func (a *apiHandler) events(w http.ResponseWriter, r *http.Request, s *session.S
 		case <-ctx.Done():
 			return
 		case <-ping.C:
+			// The session may have ended elsewhere (sign out everywhere, expiry); the stream and
+			// its mail-server connection must not outlive it.
+			if _, err := a.Sessions.FromRequest(r); err != nil {
+				fmt.Fprint(w, "event: signed_out\ndata: {}\n\n")
+				rc.Flush()
+				return
+			}
 			fmt.Fprint(w, ": ping\n\n")
 		case e, ok := <-ch:
 			if !ok {

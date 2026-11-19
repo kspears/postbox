@@ -19,8 +19,16 @@ import (
 // ends and the browser is told why. Any other failure to reach the server leaves the session
 // alone.
 func (a *apiHandler) withMail(w http.ResponseWriter, r *http.Request, s *session.Session, fn func(*mail.Conn) error) bool {
-	acct := mail.Account{ClientIP: a.clientIP(r), Name: s.Account, Password: s.Password}
-	err := a.Mail.Do(r.Context(), acct, fn)
+	return a.answerMailError(w, r, s, a.Mail.Do(r.Context(), a.account(r, s), fn))
+}
+
+// account is what the mail server is told about the person behind the request.
+func (a *apiHandler) account(r *http.Request, s *session.Session) mail.Account {
+	return mail.Account{ClientIP: a.clientIP(r), Name: s.Account, Password: s.Password}
+}
+
+// answerMailError answers the request when err is not nil, and reports whether it was nil.
+func (a *apiHandler) answerMailError(w http.ResponseWriter, r *http.Request, s *session.Session, err error) bool {
 	switch {
 	case err == nil:
 		return true
@@ -31,6 +39,8 @@ func (a *apiHandler) withMail(w http.ResponseWriter, r *http.Request, s *session
 			http.SetCookie(w, clear)
 		}
 		writeError(w, http.StatusUnauthorized, errPasswordChanged)
+	case errors.Is(err, mail.ErrNotFound) || mail.IsMissingFolder(err):
+		writeError(w, http.StatusNotFound, errNotFound)
 	case errors.Is(err, mail.ErrUnreachable):
 		log.Printf("%s %s: %v", r.Method, r.URL.Path, err)
 		writeError(w, http.StatusServiceUnavailable, errUnreachable)
@@ -38,6 +48,11 @@ func (a *apiHandler) withMail(w http.ResponseWriter, r *http.Request, s *session
 		internalError(w, r, err)
 	}
 	return false
+}
+
+// withStream is withMail for long work, on a connection of its own (see mail.Pool.Stream).
+func (a *apiHandler) withStream(w http.ResponseWriter, r *http.Request, s *session.Session, fn func(*mail.Conn) error) bool {
+	return a.answerMailError(w, r, s, a.Mail.Stream(r.Context(), a.account(r, s), fn))
 }
 
 func (a *apiHandler) folders(w http.ResponseWriter, r *http.Request, s *session.Session) {

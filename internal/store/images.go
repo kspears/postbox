@@ -1,6 +1,9 @@
 package store
 
-import "context"
+import (
+	"context"
+	"strings"
+)
 
 // AllowImages records that account always loads remote images from sender.
 func (s *Store) AllowImages(ctx context.Context, account, sender string) error {
@@ -8,16 +11,28 @@ func (s *Store) AllowImages(ctx context.Context, account, sender string) error {
 	return err
 }
 
-// ImagesAllowed returns which of senders account always loads remote images from.
+// ImagesAllowed returns the senders, of those given, whose remote images account always loads.
 func (s *Store) ImagesAllowed(ctx context.Context, account string, senders []string) (map[string]bool, error) {
 	allowed := map[string]bool{}
+	if len(senders) == 0 {
+		return allowed, nil
+	}
+	args := []any{account}
 	for _, sender := range senders {
-		var n int
-		err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM image_allow WHERE account = ? AND sender = ?`, account, sender).Scan(&n)
-		if err != nil {
+		args = append(args, sender)
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT sender FROM image_allow WHERE account = ? AND sender IN (?`+strings.Repeat(",?", len(senders)-1)+`)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var sender string
+		if err := rows.Scan(&sender); err != nil {
 			return nil, err
 		}
-		allowed[sender] = n > 0
+		allowed[sender] = true
 	}
-	return allowed, nil
+	return allowed, rows.Err()
 }

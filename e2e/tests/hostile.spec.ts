@@ -9,10 +9,13 @@ test.use(fromIP('203.0.113.95'));
 
 test('criterion 13: the hostile corpus runs no script and makes no outside request', async ({ page, baseURL }) => {
   test.setTimeout(120_000);
+  // Postbox's own requests for the app, the list and each message. Anything else, to Postbox's
+  // address or another, came from a message.
+  const own = /^\/(folder\/|assets\/|api\/(session|folders|conversations?|body|seen|events)(\?|$))/;
   const outside: string[] = [];
   page.on('request', (r) => {
     const url = new URL(r.url());
-    if (url.origin !== new URL(baseURL!).origin) outside.push(r.url());
+    if (url.origin !== new URL(baseURL!).origin || !own.test(url.pathname + url.search)) outside.push(r.url());
   });
   page.on('dialog', (d) => {
     outside.push(`dialog: ${d.message()}`);
@@ -20,6 +23,7 @@ test('criterion 13: the hostile corpus runs no script and makes no outside reque
   });
 
   await signIn(page, 'hostile@example.test', seedPassword());
+  outside.length = 0; // the sign-in page's own load is not under test
   await expectInbox(page);
   const rows = page.getByRole('region', { name: 'Conversations' }).getByRole('listitem');
   await expect(rows).toHaveCount(29);
