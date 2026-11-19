@@ -2,11 +2,9 @@ package mail
 
 import (
 	"bytes"
-	"encoding/base64"
 	"fmt"
 	"html"
 	"io"
-	"mime/quotedprintable"
 	"regexp"
 	"slices"
 	"strings"
@@ -14,7 +12,6 @@ import (
 
 	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapclient"
-	"github.com/emersion/go-message/charset"
 )
 
 const (
@@ -40,10 +37,7 @@ func (c *Conn) snippets(msgs []*imapclient.FetchMessageBuffer) (map[imap.UID]str
 		key := fmt.Sprint(path)
 		s := sections[key]
 		if s == nil {
-			s = &imap.FetchItemBodySection{Part: path, Peek: true, Partial: &imap.SectionPartial{Size: snippetFetch}}
-			if len(path) == 0 {
-				s.Specifier = imap.PartSpecifierText
-			}
+			s = section(path, snippetFetch)
 			sections[key] = s
 		}
 		wanted[m.UID] = want{part: part, section: s}
@@ -135,30 +129,23 @@ func htmlText(doc string) string {
 
 // snippet turns the first bytes of a body part into a line of plain text.
 func snippet(raw []byte, part *imap.BodyStructureSinglePart) string {
-	var r io.Reader = bytes.NewReader(raw)
+	// The fetch stops part-way, possibly inside a base64 quantum or a "=XX" escape: trim to
+	// what decodes, then decode as a whole body would be.
 	switch strings.ToLower(part.Encoding) {
 	case "base64":
-		clean := bytes.Map(func(r rune) rune {
+		raw = bytes.Map(func(r rune) rune {
 			if r == '\r' || r == '\n' || r == ' ' || r == '\t' {
 				return -1
 			}
 			return r
 		}, raw)
-		clean = clean[:len(clean)/4*4] // the fetch may end mid-quantum
-		r = base64.NewDecoder(base64.StdEncoding, bytes.NewReader(clean))
+		raw = raw[:len(raw)/4*4]
 	case "quoted-printable":
-		// The fetch may end inside an "=XX" escape.
 		if i := bytes.LastIndexByte(raw, '='); i >= 0 && len(raw)-i < 3 {
 			raw = raw[:i]
 		}
-		r = quotedprintable.NewReader(bytes.NewReader(raw))
 	}
-	if cs := part.Params["charset"]; cs != "" && !strings.EqualFold(cs, "utf-8") && !strings.EqualFold(cs, "us-ascii") {
-		if converted, err := charset.Reader(cs, r); err == nil {
-			r = converted
-		}
-	}
-	decoded, _ := io.ReadAll(r) // a truncated tail is expected; keep what decoded
+	decoded, _ := io.ReadAll(textDecoder(bytes.NewReader(raw), part)) // keep what decoded
 
 	text := string(decoded)
 	if strings.EqualFold(part.Subtype, "html") {

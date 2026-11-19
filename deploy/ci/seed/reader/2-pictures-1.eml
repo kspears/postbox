@@ -1,0 +1,25 @@
+From: Picture News <pictures@example.org>
+To: reader@example.test
+Subject: Pictures 1
+Date: Wed, 11 Nov 2026 01:00:00 +0000
+Message-ID: <pictures-1@example.org>
+MIME-Version: 1.0
+Content-Type: multipart/related; boundary="rel1"
+
+--rel1
+Content-Type: text/html; charset=utf-8
+
+<html><body>
+<p>Pictures 1: our logo and this week's photo.</p>
+<p><img src="cid:logo1@example.org" alt="logo" width="40" height="20"></p>
+<p><img src="http://sink/remote-1.png" alt="photo" width="40" height="20"></p>
+</body></html>
+
+--rel1
+Content-Type: image/png
+Content-ID: <logo1@example.org>
+Content-Disposition: inline; filename="logo.png"
+Content-Transfer-Encoding: base64
+
+iVBORw0KGgoAAAANSUhEUgAAACgAAAAUCAIAAABwJOjsAAAAJElEQVR4nGPQj748IIhh1OJRi0ctHrV41OJRi0ctHrV45FgMAB8yQt2QL2XOAAAAAElFTkSuQmCC
+--rel1--

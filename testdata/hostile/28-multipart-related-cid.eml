@@ -1,0 +1,31 @@
+From: Hostile Sender <hostile@example.org>
+To: hostile@example.test
+Subject: Hostile 28: multipart/related: cid: inline image (exists) plus a remote image
+Date: Mon, 2 Nov 2026 10:28:00 +0000
+Message-ID: <hostile-28@example.org>
+MIME-Version: 1.0
+Content-Type: multipart/related; type="text/html"; boundary="RELBOUNDARY01"
+
+--RELBOUNDARY01
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: 7bit
+
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head><body>
+<p>Visible text 28</p>
+<img src="cid:inline1@example.org" alt="inline">
+<img src="cid:missing@example.org" alt="missing">
+<img src="http://sink/28-multipart-related-cid/remote-img" alt="remote">
+<div style="background:url(cid:inline1@example.org)">cid bg</div>
+<div style="background:url(http://sink/28-multipart-related-cid/remote-bg)">remote bg</div>
+</body></html>
+
+--RELBOUNDARY01
+Content-Type: image/gif
+Content-Transfer-Encoding: base64
+Content-ID: <inline1@example.org>
+Content-Disposition: inline; filename="dot.gif"
+
+R0lGODlhAQABAIAAAP///wAAACwAAAAAAQABAAACAkQBADs=
+
+--RELBOUNDARY01--

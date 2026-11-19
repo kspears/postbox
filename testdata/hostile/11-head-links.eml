@@ -1,0 +1,27 @@
+From: Hostile Sender <hostile@example.org>
+To: hostile@example.test
+Subject: Hostile 11: link rel stylesheet/prefetch/preload/dns-prefetch/preconnect/icon etc.
+Date: Mon, 2 Nov 2026 10:11:00 +0000
+Message-ID: <hostile-11@example.org>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: 7bit
+
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="http://sink/11-head-links/stylesheet">
+<link rel="prefetch" href="http://sink/11-head-links/prefetch">
+<link rel="preload" href="http://sink/11-head-links/preload" as="image">
+<link rel="dns-prefetch" href="http://sink/">
+<link rel="preconnect" href="http://sink/">
+<link rel="prerender" href="http://sink/11-head-links/prerender">
+<link rel="modulepreload" href="http://sink/11-head-links/modulepreload">
+<link rel="icon" href="http://sink/11-head-links/icon">
+<link rel="shortcut icon" href="http://sink/11-head-links/shortcut-icon">
+<link rel="apple-touch-icon" href="http://sink/11-head-links/apple-touch-icon">
+<link rel="manifest" href="http://sink/11-head-links/manifest">
+<link rel="alternate stylesheet" href="http://sink/11-head-links/alt-stylesheet">
+<link rel="import" href="http://sink/11-head-links/import">
+<link rel="stylesheet" href="javascript:top.document.title='PWNED'"></head><body>
+<p>Visible text 11</p>
+
+</body></html>

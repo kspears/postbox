@@ -1,0 +1,21 @@
+From: Hostile Sender <hostile@example.org>
+To: hostile@example.test
+Subject: Hostile 04: onmouseover, onfocus+autofocus, onanimationstart
+Date: Mon, 2 Nov 2026 10:04:00 +0000
+Message-ID: <hostile-04@example.org>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: 7bit
+
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head><body>
+<p>Visible text 04</p>
+<style>@keyframes x{from{opacity:0}to{opacity:1}}</style>
+<p onmouseover="top.document.title='PWNED'" style="font-size:200px">hover</p>
+<input onfocus="top.document.title='PWNED'" autofocus>
+<button autofocus onfocus="alert(1)">b</button>
+<div style="animation-name:x;animation-duration:1ms" onanimationstart="top.document.title='PWNED'">anim</div>
+<details open ontoggle="top.document.title='PWNED'"><summary>t</summary></details>
+<marquee onstart="top.document.title='PWNED'">m</marquee>
+<video><source onerror="top.document.title='PWNED'"></video>
+</body></html>

@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Conversation } from './api';
+  import { path } from './route.svelte';
   import { strings } from './strings';
 
   interface Props {
@@ -7,9 +8,19 @@
     conversations: Conversation[];
     loading: boolean;
     hasMore: boolean;
+    folder: string;
+    selected?: number;
     onMore: () => void;
+    onOpen: (id: number) => void;
   }
-  const { account, conversations, loading, hasMore, onMore }: Props = $props();
+  const { account, conversations, loading, hasMore, folder, selected, onMore, onOpen }: Props = $props();
+
+  // A real link, so a middle click or "open in new tab" works; a plain click opens it here.
+  function open(event: MouseEvent, id: number): void {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    onOpen(id);
+  }
 
   let sentinel = $state<HTMLElement>();
 
@@ -53,7 +64,13 @@
   {/if}
   <ul>
     {#each conversations as c (c.id)}
-      <li class:unread={c.unread}>
+      <li class:unread={c.unread} class:selected={c.id === selected}>
+        <a
+          class="row"
+          href={path({ folder, conversation: c.id })}
+          aria-current={c.id === selected ? 'true' : undefined}
+          onclick={(e) => open(e, c.id)}
+        >
         <div class="top">
           <span class="who">{who(c)}</span>
           {#if c.count > 1}<span class="count" aria-label={strings.list.messages(c.count)}>{c.count}</span>{/if}
@@ -66,6 +83,7 @@
           {c.subject || strings.list.noSubject}
         </div>
         {#if c.snippet}<div class="snippet">{c.snippet}</div>{/if}
+        </a>
       </li>
     {/each}
   </ul>
@@ -85,15 +103,24 @@
   }
 
   li {
-    padding: 0.65rem 1rem;
     border-bottom: 1px solid var(--border);
+    min-width: 0;
+  }
+
+  .row {
     display: grid;
     gap: 0.15rem;
-    min-width: 0;
+    padding: 0.65rem 1rem;
+    color: inherit;
+    text-decoration: none;
   }
 
   li:hover {
     background: var(--hover);
+  }
+
+  li.selected {
+    background: var(--selected);
   }
 
   .top {

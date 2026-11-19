@@ -1,0 +1,26 @@
+From: Hostile Sender <hostile@example.org>
+To: hostile@example.test
+Subject: Hostile 22: comments hiding tags, conditional comments, odd comment closers
+Date: Mon, 2 Nov 2026 10:22:00 +0000
+Message-ID: <hostile-22@example.org>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: 7bit
+
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head><body>
+<p>Visible text 22</p>
+<!--><img src=http://sink/22-comment-tricks/empty-comment onerror="top.document.title='PWNED'">-->
+<!--->
+<img src=http://sink/22-comment-tricks/dash-comment onerror="top.document.title='PWNED'">-->
+<!-- --!><img src=http://sink/22-comment-tricks/bang-close onerror="top.document.title='PWNED'"> -->
+<!--[if gte mso 9]><img src="http://sink/22-comment-tricks/mso-9"><script>top.document.title='PWNED'</script><![endif]-->
+<!--[if !mso]><!--><img src="http://sink/22-comment-tricks/not-mso-visible"><!--<![endif]-->
+<!--[if IE]><link rel=stylesheet href="http://sink/22-comment-tricks/ie-css"><![endif]-->
+<!--[if gte mso 9]><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml><![endif]-->
+<![if !IE]><img src="http://sink/22-comment-tricks/downlevel-revealed"><![endif]>
+<!-- <p title="--> <img src=http://sink/22-comment-tricks/comment-attr onerror='top.document.title='PWNED''> "> -->
+<?php echo 1; ?><img src=http://sink/22-comment-tricks/pi onerror="top.document.title='PWNED'">
+<![CDATA[<img src=http://sink/22-comment-tricks/cdata-html onerror="top.document.title='PWNED'">]]>
+<!DOCTYPE html [<!ENTITY x SYSTEM "http://sink/22-comment-tricks/xxe">]>
+</body></html>

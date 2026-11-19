@@ -3,6 +3,7 @@
 package api
 
 import (
+	"context"
 	"io/fs"
 	"net/http"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/kspears/postbox/internal/clock"
 	"github.com/kspears/postbox/internal/mail"
 	"github.com/kspears/postbox/internal/session"
+	"github.com/kspears/postbox/internal/store"
 )
 
 // Deps is what the handlers need.
@@ -18,6 +20,10 @@ type Deps struct {
 	Sessions *session.Manager
 	Auth     *auth.Authenticator
 	Mail     *mail.Pool
+	Watch    *mail.Watcher
+	// Stopping ends when Postbox is shutting down, so open event streams can end and let it.
+	Stopping context.Context
+	Store    *store.Store
 	Clock    *clock.Clock
 	// Origin is the public URL; state-changing requests must come from it.
 	Origin string
@@ -39,6 +45,12 @@ func NewHandler(dist fs.FS, d Deps) http.Handler {
 	mux.HandleFunc("DELETE /api/sessions", a.withSession(a.signOut(true)))
 	mux.HandleFunc("GET /api/folders", a.withSession(a.folders))
 	mux.HandleFunc("GET /api/conversations", a.withSession(a.conversations))
+	mux.HandleFunc("GET /api/conversation", a.withSession(a.conversation))
+	mux.HandleFunc("GET /api/body", a.withSession(a.body))
+	mux.HandleFunc("GET /api/attachment", a.withSession(a.attachment))
+	mux.HandleFunc("POST /api/seen", a.withSession(a.markRead))
+	mux.HandleFunc("POST /api/images/allow", a.withSession(a.allowImages))
+	mux.HandleFunc("GET /api/events", a.withSession(a.events))
 	testRoutes(mux, a)
 	mux.Handle("/api/", http.NotFoundHandler())
 	mux.Handle("/", frontend(dist))

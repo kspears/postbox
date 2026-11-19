@@ -1,0 +1,20 @@
+From: Hostile Sender <hostile@example.org>
+To: hostile@example.test
+Subject: Hostile 18: </style> breakout inside style, mis-nested style
+Date: Mon, 2 Nov 2026 10:18:00 +0000
+Message-ID: <hostile-18@example.org>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: 7bit
+
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head><body>
+<p>Visible text 18</p>
+<style>p{color:red}</style><img src=http://sink/18-mxss-style-breakout/style-break-img>
+<style><!--</style><img src=x onerror="top.document.title='PWNED'">--></style>
+<style>/*</style><img src=http://sink/18-mxss-style-breakout/comment-break onerror="top.document.title='PWNED'">*/</style>
+<style>a{content:"</style><img src=http://sink/18-mxss-style-breakout/str-break onerror=top.document.title='PWNED'>"}</style>
+<svg><style>a{background:url(http://sink/18-mxss-style-breakout/svg-style-url)}</style></svg>
+<svg><style><![CDATA[a{background:url(http://sink/18-mxss-style-breakout/svg-style-cdata)}]]></style></svg>
+<svg></p><style><a title="</style><img src=http://sink/18-mxss-style-breakout/svg-p-break onerror='top.document.title='PWNED''>">
+</body></html>

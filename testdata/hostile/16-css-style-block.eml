@@ -1,0 +1,31 @@
+From: Hostile Sender <hostile@example.org>
+To: hostile@example.test
+Subject: Hostile 16: url()/@import/@font-face/@namespace/@media in style blocks
+Date: Mon, 2 Nov 2026 10:16:00 +0000
+Message-ID: <hostile-16@example.org>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: 7bit
+
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><style>
+@import url(http://sink/16-css-style-block/import-url);
+@import 'http://sink/16-css-style-block/import-string';
+@import url("http://sink/16-css-style-block/import-media") screen;
+@namespace url(http://sink/16-css-style-block/namespace);
+@font-face{font-family:x;src:url(http://sink/16-css-style-block/font-face.woff) format('woff'),url(http://sink/16-css-style-block/font-face2.ttf)}
+@media screen{.a{background:url(http://sink/16-css-style-block/media-bg)}}
+@media print,screen{@supports (display:grid){.b{list-style-image:url(http://sink/16-css-style-block/supports-media)}}}
+.c{background-image:url(http://sink/16-css-style-block/class-bg);cursor:url(http://sink/16-css-style-block/class-cursor),auto}
+.d::before{content:url(http://sink/16-css-style-block/pseudo-before)}
+.e{border-image-source:url(http://sink/16-css-style-block/border-image-source);mask-image:url(http://sink/16-css-style-block/mask-image)}
+.e{width:expression(top.document.title='PWNED');behavior:url(http://sink/16-css-style-block/behavior.htc);-moz-binding:url(http://sink/16-css-style-block/moz#x)}
+@keyframes k{from{background:url(http://sink/16-css-style-block/keyframes)}to{opacity:1}}
+.a{animation:k 1s}
+@page{background:url(http://sink/16-css-style-block/page)}
+</style>
+<style media="print">body{background:url(http://sink/16-css-style-block/style-media-print)}</style>
+<style type="text/css" src="http://sink/16-css-style-block/style-src">p{background:url(http://sink/16-css-style-block/style-type)}</style></head><body>
+<p>Visible text 16</p>
+<div class="a b c d e">styled</div>
+</body></html>

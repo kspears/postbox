@@ -26,13 +26,17 @@ cp /keys/tls/tls.crt /ca/ca.crt
 # The accounts. They are rewritten only when SEED_PASSWORD differs from the one they were
 # written with, so a test that changes one password keeps its change when compose runs this
 # again, and a new dev password still reaches every account. {PLAIN} keeps the file writable
-# without a hashing tool; dovecot does not cache lookups. bench (mailbench), paging (a long list)
-# and changer (a password that changes mid-test) are filled directly by the tests and receive no
-# mail, so postfix does not know them.
+# without a hashing tool; dovecot does not cache lookups. bench (mailbench), paging (a long list),
+# changer (a password that changes mid-test) and hostile (the hostile HTML corpus) are filled
+# directly by the tests and receive no mail, so postfix does not know them.
+accounts="alice bob reader bench paging changer hostile"
 if [ ! -f /auth/users ] || [ "$(cat /auth/seed 2>/dev/null)" != "$SEED_PASSWORD" ]; then
-	for user in alice bob bench paging changer; do
-		printf '%s@example.test:{PLAIN}%s::::::\n' "$user" "$SEED_PASSWORD"
-	done >/auth/users
+	: >/auth/users
 	printf '%s' "$SEED_PASSWORD" >/auth/seed
 	chmod 600 /auth/seed
 fi
+# Accounts added since the file was written join it with the seed password.
+for user in $accounts; do
+	grep -q "^$user@example.test:" /auth/users ||
+		printf '%s@example.test:{PLAIN}%s::::::\n' "$user" "$SEED_PASSWORD" >>/auth/users
+done

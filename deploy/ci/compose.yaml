@@ -109,6 +109,15 @@ services:
       - go_cache:/root/.cache/go-build
       - go_mod:/go/pkg/mod
 
+  # Stands in for every remote server a message may point at. Test messages send their remote
+  # images and hostile references here, and test.sh reads its log: a request it did not expect
+  # means the sanitiser or the frame's policy let something through.
+  sink:
+    image: python:3.15.2-slim@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928
+    command: ["python", "-I", "-m", "http.server", "80", "--directory", "/srv"]
+    volumes:
+      - ./sink:/srv:ro
+
   # Postbox without POSTBOX_CA_FILE: the mail server's certificate comes from an authority it
   # does not know, so every sign-in must fail with "Can't reach the mail server."
   postbox-untrusted:
@@ -141,6 +150,8 @@ services:
     volumes:
       # Signed-in browser state kept across a Postbox restart.
       - e2e_state:/e2e/.state
+      # To check, as a second mail client would, what Postbox did to a mailbox.
+      - ca:/ca:ro
 
 volumes:
   keys:

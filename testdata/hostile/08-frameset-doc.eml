@@ -1,0 +1,16 @@
+From: Hostile Sender <hostile@example.org>
+To: hostile@example.test
+Subject: Hostile 08: frameset document with frame to sink
+Date: Mon, 2 Nov 2026 10:08:00 +0000
+Message-ID: <hostile-08@example.org>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: 7bit
+
+<!DOCTYPE html>
+<html><head><title>x</title></head>
+<frameset rows="50%,50%" onload="top.document.title='PWNED'">
+<frame src="http://sink/08-frameset-doc/frame1">
+<frame src="data:text/html,<script>top.document.title='PWNED'</script>">
+<noframes><p>Visible text 08</p></noframes>
+</frameset></html>

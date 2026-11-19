@@ -1,0 +1,27 @@
+From: Hostile Sender <hostile@example.org>
+To: hostile@example.test
+Subject: Hostile 05: javascript:/vbscript:/data: URLs in a href incl. obfuscation
+Date: Mon, 2 Nov 2026 10:05:00 +0000
+Message-ID: <hostile-05@example.org>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: 7bit
+
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head><body>
+<p>Visible text 05</p>
+<a href="javascript:top.document.title='PWNED'">plain</a>
+<a href="JaVaScRiPt:top.document.title='PWNED'">mixed</a>
+<a href="&#106;avascript:top.document.title='PWNED'">entity dec</a>
+<a href="&#x6A;&#x61;vascript:top.document.title='PWNED'">entity hex</a>
+<a href="java&#9;script:top.document.title='PWNED'">tab entity</a>
+<a href="jav&#x0A;ascript:top.document.title='PWNED'">newline entity</a>
+<a href="java	script:top.document.title='PWNED'">raw tab</a>
+<a href="  javascript:top.document.title='PWNED'">leading space</a>
+<a href="&#1;javascript:top.document.title='PWNED'">leading ctrl</a>
+<a href="vbscript:msgbox(1)">vbscript</a>
+<a href="data:text/html,<script>top.document.title='PWNED'</script>">data html</a>
+<a href="data:text/html;base64,PHNjcmlwdD50b3AuZG9jdW1lbnQudGl0bGU9J1BXTkVEJzwvc2NyaXB0Pg==">data b64</a>
+<a href="javascript&colon;top.document.title='PWNED'">colon entity</a>
+<a href="http://sink/05-js-url-anchor/plain-link" ping="http://sink/05-js-url-anchor/ping">remote link with ping</a>
+</body></html>

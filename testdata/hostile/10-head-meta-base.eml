@@ -1,0 +1,21 @@
+From: Hostile Sender <hostile@example.org>
+To: hostile@example.test
+Subject: Hostile 10: meta refresh to sink, base href then relative img
+Date: Mon, 2 Nov 2026 10:10:00 +0000
+Message-ID: <hostile-10@example.org>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: 7bit
+
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=http://sink/10-head-meta-base/refresh">
+<meta http-equiv="Refresh" content="0; URL='javascript:top.document.title='PWNED''">
+<meta http-equiv="Set-Cookie" content="a=b">
+<meta http-equiv="Content-Security-Policy" content="default-src *">
+<base href="http://sink/head-meta-base/base/"></head><body>
+<p>Visible text 10</p>
+<img src="x.png">
+<img src="relative/y.png" srcset="z.png 2x">
+<a href="rel-link.html">relative link</a>
+<link rel="stylesheet" href="rel.css">
+</body></html>

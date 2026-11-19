@@ -1,0 +1,21 @@
+From: Hostile Sender <hostile@example.org>
+To: hostile@example.test
+Subject: Hostile 07: iframe, frame/frameset, object, embed, applet, portal to sink
+Date: Mon, 2 Nov 2026 10:07:00 +0000
+Message-ID: <hostile-07@example.org>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: 7bit
+
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head><body>
+<p>Visible text 07</p>
+<iframe src="http://sink/07-frames-plugins/iframe"></iframe>
+<iframe srcdoc="<script>top.document.title='PWNED'</script><img src=http://sink/07-frames-plugins/srcdoc-img>"></iframe>
+<object data="http://sink/07-frames-plugins/object" type="text/html"></object>
+<object classid="clsid:D27CDB6E-AE6D-11cf-96B8-444553540000"><param name="movie" value="http://sink/07-frames-plugins/param"></object>
+<embed src="http://sink/07-frames-plugins/embed" type="text/html">
+<applet code="X.class" codebase="http://sink/07-frames-plugins/applet/"></applet>
+<portal src="http://sink/07-frames-plugins/portal"></portal>
+<frameset><frame src="http://sink/07-frames-plugins/frame"></frameset>
+</body></html>

@@ -48,5 +48,18 @@ export const strings = {
 
   reading: {
     nothingSelected: 'Select a conversation to read it.',
+    back: 'Back',
+    folders: 'Folders',
+    to: 'To',
+    cc: 'Cc',
+    noContent: 'This message has no content.',
+    failed: "This message couldn't be loaded.",
+    gone: 'This conversation is no longer in this folder.',
+    remoteBlocked: 'Remote images are blocked.',
+    loadImages: 'Load images',
+    alwaysLoad: 'Always load from this sender',
+    attachments: 'Attachments',
+    download: (name: string) => `Download ${name}`,
+    me: 'me',
   },
 } as const;

@@ -7,6 +7,7 @@ const knownErrors = [
   'signed_out',
   'password_changed',
   'no_folder',
+  'not_found',
   'internal',
 ] as const;
 export type ErrorCode = (typeof knownErrors)[number];
@@ -44,6 +45,30 @@ export interface Conversation {
   unread: boolean;
   flagged: boolean;
   attachments: boolean;
+}
+
+export interface Attachment {
+  part: string;
+  name: string;
+  type: string;
+  size: number;
+}
+
+export interface Message {
+  folder: string;
+  uid: number;
+  from: Person[];
+  to: Person[];
+  cc: Person[];
+  date: string;
+  subject: string;
+  unread: boolean;
+  flagged: boolean;
+  hasBody: boolean;
+  attachments: Attachment[];
+  body?: string;
+  sender?: string;
+  imagesAllowed: boolean;
 }
 
 export interface ConversationPage {
@@ -109,4 +134,29 @@ export function conversations(folder: string, cursor?: number, shown = 0): Promi
     query.set('shown', String(shown));
   }
   return call('GET', `/api/conversations?${query}`);
+}
+
+export async function conversation(folder: string, id: number): Promise<Result<Message[]>> {
+  const query = new URLSearchParams({ folder, id: String(id) });
+  const result = await call<{ messages: Message[] }>('GET', `/api/conversation?${query}`);
+  return result.ok ? { ok: true, value: result.value.messages } : result;
+}
+
+export function markRead(folder: string, uids: number[]): Promise<Result<void>> {
+  return call('POST', '/api/seen', { folder, uids });
+}
+
+export function allowImages(sender: string): Promise<Result<void>> {
+  return call('POST', '/api/images/allow', { sender });
+}
+
+export function attachmentURL(m: Message, part: string): string {
+  return `/api/attachment?${new URLSearchParams({ folder: m.folder, uid: String(m.uid), part })}`;
+}
+
+/** The body URL with remote images allowed for this one view. */
+export function withImages(body: string): string {
+  const url = new URL(body, location.origin);
+  url.searchParams.set('images', '1');
+  return url.pathname + url.search;
 }
