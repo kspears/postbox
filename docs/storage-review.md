@@ -1,8 +1,6 @@
 # Storage review
 
-Criterion 28's review step: a person reads the code below and confirms that no key able to
-decrypt a stored password is written to the database or to disk, and that the only one read
-from configuration is `POSTBOX_PASSKEY_KEY`, used only for passkeys without PRF. Record the
+The checklist for the review step of criterion 28 in [the spec](specs/postbox.md). Record the
 date, the commit and the reviewer at the end.
 
 ## Where an account password is kept
@@ -13,7 +11,8 @@ date, the commit and the reviewer at the end.
 | `passkeys.sealed`, `lock = 'prf'` | HKDF of the passkey's PRF output and credential id | Only in the passkey; the browser sends the output at each sign-in |
 | `passkeys.sealed`, `lock = 'server'` | HKDF of `POSTBOX_PASSKEY_KEY` and the credential id | The environment, never the database |
 | Memory, during a send's undo window | Not sealed | Process memory only, gone at exit |
-| Memory, a sign-in waiting for a new password | The passkey's derived key | Process memory, at most 2 minutes |
+| Memory, a sign-in waiting for a new password | The passkey's derived key | Process memory, dropped after 2 minutes |
+| Memory, the account's IMAP connections | Not stored; `mail.Pool` keeps a SHA-256 of the password to notice a change | Process memory only |
 
 Every sealed value uses AES-256-GCM, and is bound to its row (session id or credential id) and
 account through the associated data, so it cannot be moved to another row.
@@ -34,7 +33,8 @@ account through the associated data, so it cannot be moved to another row.
    `pending_sends` table records state and the server's reply, not the password.
 6. `internal/config/config.go`: `POSTBOX_PASSKEY_KEY` is the only secret read from the
    environment.
-7. Logging: `grep -rn 'log\.' internal cmd` shows no password, key, cookie or PRF value.
+7. Output: `grep -rnE 'log\.|Fprint|Print' internal cmd` shows no password, key, cookie or PRF
+   value in what Postbox logs or prints.
 
 The automated half of this check is in `deploy/ci/test.sh` (criterion 4): it searches a copy of
 `postbox.db` for the seeded password as plain text, base64 and hex.

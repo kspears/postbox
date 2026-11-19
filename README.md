@@ -33,7 +33,8 @@ must be reachable only through that proxy.
 ## Deployment
 
 The image is `ghcr.io/kspears/postbox`, for linux/amd64 and linux/arm64, published from each
-version tag. It runs as an unprivileged user and keeps its state in `/data/postbox`.
+version tag once the full check passes. GitHub creates the package private; make it public in
+its package settings for others to pull it. The image runs as an unprivileged user.
 
 ```yaml
 services:
@@ -48,19 +49,27 @@ services:
       POSTBOX_PASSKEY_KEY: ${POSTBOX_PASSKEY_KEY}   # optional; see below
     volumes:
       - postbox:/data/postbox
-    # Reachable only by the reverse proxy, which terminates TLS for POSTBOX_PUBLIC_URL.
-    expose: ["8080"]
+    # Port 8080, on a network shared only with the reverse proxy: see below.
+    networks: [proxy]
 
 volumes:
   postbox:
+
+networks:
+  proxy:
 ```
 
-**The reverse proxy** must serve Postbox at the root of `POSTBOX_PUBLIC_URL` over HTTPS,
-pass the client's address in the header named by `POSTBOX_CLIENT_IP_HEADER`, and not buffer
-responses on `/api/events`, which is a stream of server-sent events.
+**The reverse proxy** must serve Postbox at the root of `POSTBOX_PUBLIC_URL` over HTTPS and
+not buffer responses on `/api/events`, which is a stream of server-sent events. Postbox reads
+the client's address from the last entry of the header named by `POSTBOX_CLIENT_IP_HEADER`,
+the one the proxy nearest Postbox adds; behind a CDN, have that proxy set the header to the real
+address. Postbox trusts the header from anything that can reach it, so only the proxy may: a
+container that reaches port 8080 directly can claim any address, past the sign-in throttle.
 
-**The mail server** needs IMAP and submission over TLS with a certificate Postbox trusts (add
-`POSTBOX_CA_FILE` for a private authority), and IMAP `THREAD` and `SORT`, which Dovecot has.
+**The mail server** needs IMAP over implicit TLS (port 993, not STARTTLS on 143) and
+submission over implicit TLS on 465 or STARTTLS on another port, with a certificate Postbox
+trusts (add `POSTBOX_CA_FILE` for a private authority), and IMAP `THREAD` and `SORT`, which
+Dovecot has.
 Postbox works best when the mail server:
 
 - marks the special folders (`\Archive`, `\Trash`, `\Drafts`, `\Sent`, `\Junk`); without
@@ -72,15 +81,16 @@ Postbox works best when the mail server:
   for `XCLIENT` on submission. Without this, every sign-in looks like it comes from Postbox,
   and the mail server's own throttling counts everyone together.
 
-**State.** `postbox.db` holds settings, identities, collected addresses, passkeys and sessions,
-never mail. Losing it signs everyone out and forgets their settings and passkeys. Back up the
-volume like any other; a copy of it alone reveals no account password.
+**State.** `/data/postbox/postbox.db` holds settings, identities, collected addresses, passkeys
+and sessions, never mail. Losing it signs everyone out and forgets their settings and passkeys.
+It is SQLite in WAL mode: back it up with Postbox stopped, or from an atomic snapshot of the
+volume, copying `postbox.db` with its `-wal` file. A copy of it alone reveals no account
+password.
 
-**Passkeys** work in any browser for passkey providers with the WebAuthn PRF extension. To
-allow providers without it, such as 1Password and Bitwarden, set `POSTBOX_PASSKEY_KEY` to the
-output of `openssl rand -base64 32` and keep it out of the state volume and its backups: with
-both, the passwords stored for those passkeys can be read. Changing the key breaks those
-passkeys until they are added again.
+**Passkeys** work for passkey providers with the WebAuthn PRF extension. For providers without
+it, such as 1Password and Bitwarden, set `POSTBOX_PASSKEY_KEY` (see Configuration) and keep it
+away from the state volume and its backups: the two together reveal the passwords stored for
+those passkeys.
 
 **A person who lost their passkey** while "Require passkey" was on is let back in by the
 operator:

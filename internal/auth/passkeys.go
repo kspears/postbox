@@ -109,6 +109,9 @@ func (c *ceremonies) put(now time.Time, cer ceremony) (string, error) {
 	cer.expires = now.Add(ceremonyLife)
 	if cer.kind == newPassword {
 		cer.expires = now.Add(newPasswordLife)
+		// It holds a key that opens a stored password: gone when it expires, not when the map
+		// next fills.
+		time.AfterFunc(newPasswordLife, func() { c.drop(nonce) })
 	}
 	c.byID[nonce] = cer
 	return nonce, nil

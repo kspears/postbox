@@ -195,9 +195,9 @@ test('Settings: appearance applies and stays; plain text makes new messages plai
   await expectInbox(page);
   await expect.poll(textColour).toBe(darkText);
   await page.getByRole('button', { name: 'Compose', exact: true }).click();
-  const body = page.getByRole('region', { name: 'New message' }).getByLabel('Message');
-  await expect(body).toHaveJSProperty('tagName', 'TEXTAREA');
-  await page.getByRole('region', { name: 'New message' }).getByRole('button', { name: 'Discard' }).click();
+  const composer = page.getByRole('region', { name: 'New message' });
+  await expect(composer.getByLabel('Message')).toHaveJSProperty('tagName', 'TEXTAREA');
+  await composer.getByRole('button', { name: 'Discard' }).click();
 
   // Light holds even when the system is dark.
   await page.emulateMedia({ colorScheme: 'dark' });

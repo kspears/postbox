@@ -1,16 +1,20 @@
 name: release
 
-# A version tag (v1.0.0) publishes the image for linux/amd64 and linux/arm64 to
-# ghcr.io/<owner>/postbox, tagged with the version and its major.minor. Nothing else publishes.
+# A version tag (v1.0.0) runs the full check, then publishes the image for linux/amd64 and
+# linux/arm64 to ghcr.io/<owner>/postbox, tagged with the version and its major.minor (no
+# "latest"). Nothing else publishes.
 on:
   push:
     tags: ['v*.*.*']
 
-permissions:
-  contents: read
-
 jobs:
+  check:
+    uses: ./.github/workflows/check.yml
+    permissions:
+      contents: read
+
   image:
+    needs: check
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -28,6 +32,7 @@ jobs:
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ghcr.io/${{ github.repository }}
+          flavor: latest=false
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
@@ -39,3 +44,5 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
