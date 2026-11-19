@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { expectInbox, fetchBySubject, fromIP, seedPassword, signIn, structureOf, writeMessage } from '../helpers';
+import { expectInbox, fetchBySubject, fromIP, openSettings, seedPassword, signIn, structureOf, writeMessage } from '../helpers';
 
 // Milestone 7: rich text, files, identities and signatures, and addresses offered as you type.
 test.use(fromIP('203.0.113.140'));
@@ -38,11 +38,6 @@ async function partText(account: string, subject: string, part: string): Promise
   return raw.replace(/=\r?\n/g, '').replace(/=([0-9A-F]{2})/g, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)));
 }
 
-async function openSettings(page: Page): Promise<Locator> {
-  await page.getByRole('button', { name: /^Account:/ }).click();
-  await page.getByRole('menuitem', { name: 'Settings' }).click();
-  return page.getByRole('dialog', { name: 'Settings' });
-}
 
 test('criterion 21: rich text is kept in Drafts and arrives as HTML with a plain-text part', async ({ page }) => {
   await signIn(page, 'writer@example.test', seedPassword());

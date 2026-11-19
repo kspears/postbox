@@ -8,17 +8,15 @@ package session
 
 import (
 	"context"
-	"crypto/aes"
-	"crypto/cipher"
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/kspears/postbox/internal/clock"
+	"github.com/kspears/postbox/internal/secret"
 	"github.com/kspears/postbox/internal/store"
 )
 
@@ -168,32 +166,9 @@ func additionalData(id, account string) []byte {
 }
 
 func seal(key []byte, id, account, password string) ([]byte, error) {
-	aead, err := gcm(key)
-	if err != nil {
-		return nil, err
-	}
-	nonce := make([]byte, aead.NonceSize())
-	rand.Read(nonce)
-	return aead.Seal(nonce, nonce, []byte(password), additionalData(id, account)), nil
+	return secret.Seal(key, additionalData(id, account), password)
 }
 
 func open(key []byte, id, account string, sealed []byte) (string, error) {
-	aead, err := gcm(key)
-	if err != nil {
-		return "", err
-	}
-	if len(sealed) < aead.NonceSize() {
-		return "", errors.New("sealed password too short")
-	}
-	nonce, ciphertext := sealed[:aead.NonceSize()], sealed[aead.NonceSize():]
-	plain, err := aead.Open(nil, nonce, ciphertext, additionalData(id, account))
-	return string(plain), err
-}
-
-func gcm(key []byte) (cipher.AEAD, error) {
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return nil, fmt.Errorf("session key: %w", err)
-	}
-	return cipher.NewGCM(block)
+	return secret.Open(key, additionalData(id, account), sealed)
 }

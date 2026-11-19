@@ -11,6 +11,10 @@ const knownErrors = [
   'folder_exists',
   'too_late',
   'sending',
+  'passkey_unsupported',
+  'passkey_no_key',
+  'passkey_failed',
+  'passkey_required',
   'internal',
 ] as const;
 export type ErrorCode = (typeof knownErrors)[number];
@@ -272,7 +276,19 @@ export interface ComposerView {
   sizeLimit: number;
 }
 
-export function settings(): Promise<Result<{ preferences: Preferences; identities: Identity[] }>> {
+export interface Passkey {
+  id: string;
+  added: string;
+}
+
+export interface SettingsView {
+  preferences: Preferences;
+  identities: Identity[];
+  passkeys: Passkey[];
+  requirePasskey: boolean;
+}
+
+export function settings(): Promise<Result<SettingsView>> {
   return call('GET', '/api/settings');
 }
 
@@ -351,4 +367,162 @@ export async function notices(): Promise<Result<SendStatus[]>> {
 
 export function dismissNotice(id: string): Promise<Result<void>> {
   return call('POST', '/api/notices/dismiss', { id });
+}
+
+// --- passkeys ---
+// The server speaks WebAuthn's JSON forms (bytes as base64url); the browser's API wants bytes.
+
+/** Whether this browser can use passkeys at all. */
+export const passkeysSupported = typeof window !== 'undefined' && 'PublicKeyCredential' in window;
+
+function fromBase64url(s: string): Uint8Array<ArrayBuffer> {
+  const binary = atob(s.replace(/-/g, '+').replace(/_/g, '/'));
+  return Uint8Array.from(binary, (c) => c.charCodeAt(0));
+}
+
+function toBase64url(bytes: ArrayBuffer | ArrayBufferView): string {
+  const view = bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return btoa(String.fromCharCode(...view)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+interface DescriptorJSON {
+  id: string;
+  type: 'public-key';
+  transports?: AuthenticatorTransport[];
+}
+interface PRFJSON {
+  prf?: { eval?: { first: string } };
+}
+
+const descriptors = (list?: DescriptorJSON[]): PublicKeyCredentialDescriptor[] | undefined =>
+  list?.map((d) => ({ ...d, id: fromBase64url(d.id) }));
+
+const prfInput = (ext?: PRFJSON): AuthenticationExtensionsClientInputs | undefined =>
+  ext?.prf?.eval ? { prf: { eval: { first: fromBase64url(ext.prf.eval.first) } } } : undefined;
+
+type CreationJSON = Omit<PublicKeyCredentialCreationOptions, 'challenge' | 'user' | 'excludeCredentials' | 'extensions'> & {
+  challenge: string;
+  user: { id: string; name: string; displayName: string };
+  excludeCredentials?: DescriptorJSON[];
+  extensions?: PRFJSON;
+};
+type RequestJSON = Omit<PublicKeyCredentialRequestOptions, 'challenge' | 'allowCredentials' | 'extensions'> & {
+  challenge: string;
+  allowCredentials?: DescriptorJSON[];
+  extensions?: PRFJSON;
+};
+
+function credentialJSON(c: PublicKeyCredential): unknown {
+  const r = c.response;
+  const response =
+    r instanceof AuthenticatorAttestationResponse
+      ? { clientDataJSON: toBase64url(r.clientDataJSON), attestationObject: toBase64url(r.attestationObject), transports: r.getTransports() }
+      : {
+          clientDataJSON: toBase64url(r.clientDataJSON),
+          authenticatorData: toBase64url((r as AuthenticatorAssertionResponse).authenticatorData),
+          signature: toBase64url((r as AuthenticatorAssertionResponse).signature),
+          userHandle: (r as AuthenticatorAssertionResponse).userHandle
+            ? toBase64url((r as AuthenticatorAssertionResponse).userHandle!)
+            : undefined,
+        };
+  // The PRF output goes to the server on its own, never as part of the credential.
+  return { id: c.id, rawId: toBase64url(c.rawId), type: c.type, authenticatorAttachment: c.authenticatorAttachment, response, clientExtensionResults: {} };
+}
+
+function prfOutput(c: PublicKeyCredential): string {
+  const first = c.getClientExtensionResults().prf?.results?.first;
+  return first ? toBase64url(first) : '';
+}
+
+/** The person closed the browser's passkey prompt, or it timed out. */
+export const cancelled = Symbol('cancelled');
+
+async function prompt(run: () => Promise<Credential | null>): Promise<PublicKeyCredential | typeof cancelled> {
+  try {
+    const c = await run();
+    return c instanceof PublicKeyCredential ? c : cancelled;
+  } catch (e) {
+    if (e instanceof DOMException && (e.name === 'NotAllowedError' || e.name === 'AbortError')) return cancelled;
+    throw e;
+  }
+}
+
+/** A passkey just created, waiting for its PRF output when create() gave none. */
+export interface NewPasskey {
+  nonce: string;
+  credential: unknown;
+  rawId: ArrayBuffer;
+  salt?: string;
+  prf: string;
+}
+
+/** Asks the browser to create a passkey for this account (the first prompt of "Add a passkey"). */
+export async function createPasskey(): Promise<Result<NewPasskey> | typeof cancelled> {
+  const started = await call<{ nonce: string; options: CreationJSON }>('POST', '/api/passkeys/options');
+  if (!started.ok) return started;
+  const o = started.value.options;
+  const publicKey: PublicKeyCredentialCreationOptions = {
+    ...o,
+    challenge: fromBase64url(o.challenge),
+    user: { ...o.user, id: fromBase64url(o.user.id) },
+    excludeCredentials: descriptors(o.excludeCredentials),
+    extensions: prfInput(o.extensions),
+  };
+  const c = await prompt(() => navigator.credentials.create({ publicKey }));
+  if (c === cancelled) return c;
+  return {
+    ok: true,
+    value: { nonce: started.value.nonce, credential: credentialJSON(c), rawId: c.rawId, salt: o.extensions?.prf?.eval?.first, prf: prfOutput(c) },
+  };
+}
+
+/** Uses a passkey just created once, for the PRF output its creation did not give. Some browsers
+ * allow one prompt per click, so this is a second step the person starts. */
+export async function unlockNewPasskey(p: NewPasskey): Promise<NewPasskey | typeof cancelled> {
+  const c = await prompt(() =>
+    navigator.credentials.get({
+      publicKey: {
+        challenge: crypto.getRandomValues(new Uint8Array(32)),
+        allowCredentials: [{ type: 'public-key', id: p.rawId }],
+        userVerification: 'required',
+        extensions: p.salt ? { prf: { eval: { first: fromBase64url(p.salt) } } } : undefined,
+      },
+    }),
+  );
+  return c === cancelled ? c : { ...p, prf: prfOutput(c) };
+}
+
+/** Stores a new passkey; it fails with passkey_unsupported when it gave no PRF output. */
+export function savePasskey(p: NewPasskey): Promise<Result<Passkey>> {
+  return call('POST', '/api/passkeys', { nonce: p.nonce, credential: p.credential, prf: p.prf });
+}
+
+export function removePasskey(id: string): Promise<Result<{ requirePasskey: boolean }>> {
+  return call('POST', '/api/passkeys/delete', { id });
+}
+
+export function setRequirePasskey(on: boolean): Promise<Result<void>> {
+  return call('PUT', '/api/require-passkey', { on });
+}
+
+/** "Sign in with a passkey": the account, or a nonce when the mail server refused the password
+ * stored for the passkey and a new one is needed. */
+export async function passkeySignIn(): Promise<Result<Account | { newPassword: string }> | typeof cancelled> {
+  const started = await call<{ nonce: string; options: RequestJSON }>('POST', '/api/passkey-session/options');
+  if (!started.ok) return started;
+  const o = started.value.options;
+  const publicKey: PublicKeyCredentialRequestOptions = {
+    ...o,
+    challenge: fromBase64url(o.challenge),
+    allowCredentials: descriptors(o.allowCredentials),
+    extensions: prfInput(o.extensions),
+  };
+  const c = await prompt(() => navigator.credentials.get({ publicKey }));
+  if (c === cancelled) return c;
+  return call('POST', '/api/passkey-session', { nonce: started.value.nonce, credential: credentialJSON(c), prf: prfOutput(c) });
+}
+
+/** Finishes a passkey sign-in with the account's new password. */
+export function passkeyNewPassword(nonce: string, password: string): Promise<Result<Account>> {
+  return call('POST', '/api/passkey-session/password', { nonce, password });
 }

@@ -1,5 +1,21 @@
 <script lang="ts">
-  import { deleteIdentity, saveIdentity, savePreferences, type Identity, type Preferences } from './api';
+  import {
+    cancelled,
+    createPasskey,
+    deleteIdentity,
+    passkeysSupported,
+    removePasskey,
+    saveIdentity,
+    savePasskey,
+    savePreferences,
+    setRequirePasskey,
+    settings,
+    unlockNewPasskey,
+    type Identity,
+    type NewPasskey,
+    type Passkey,
+    type Preferences,
+  } from './api';
   import type RichEditor from './RichEditor.svelte';
   import { strings } from './strings';
 
@@ -62,6 +78,80 @@
     onIdentities(identities.filter((x) => x.id !== i.id));
   }
 
+  // --- passkeys ---
+  // Loaded fresh each time Settings opens.
+  let passkeys = $state<Passkey[]>([]);
+  let required = $state(false);
+  $effect(() => {
+    void settings().then((result) => {
+      if (!result.ok) return;
+      passkeys = result.value.passkeys;
+      required = result.value.requirePasskey;
+    });
+  });
+
+  const added = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' });
+  const addedOn = (p: Passkey): string => added.format(new Date(p.added));
+
+  // A passkey created whose PRF output still has to be asked for, in a second prompt.
+  let unfinished = $state<NewPasskey | null>(null);
+  let passkeyProblem = $state('');
+  let working = $state(false);
+
+  async function addPasskey(): Promise<void> {
+    passkeyProblem = '';
+    working = true;
+    try {
+      const created = await createPasskey();
+      if (created === cancelled) return;
+      if (!created.ok) {
+        passkeyProblem = strings.settings.passkeyFailed;
+        return;
+      }
+      if (created.value.prf) await keep(created.value);
+      else unfinished = created.value;
+    } finally {
+      working = false;
+    }
+  }
+
+  async function finishPasskey(): Promise<void> {
+    if (!unfinished) return;
+    working = true;
+    try {
+      const used = await unlockNewPasskey(unfinished);
+      if (used === cancelled) return;
+      unfinished = null;
+      await keep(used);
+    } finally {
+      working = false;
+    }
+  }
+
+  async function keep(p: NewPasskey): Promise<void> {
+    const saved = await savePasskey(p);
+    if (saved.ok) passkeys = [...passkeys, saved.value];
+    else passkeyProblem = saved.error === 'passkey_unsupported' ? strings.settings.passkeyUnsupported : strings.settings.passkeyFailed;
+  }
+
+  async function forget(p: Passkey): Promise<void> {
+    const result = await removePasskey(p.id);
+    if (!result.ok) {
+      problem = strings.settings.saveFailed;
+      return;
+    }
+    passkeys = passkeys.filter((x) => x.id !== p.id);
+    required = result.value.requirePasskey;
+  }
+
+  async function require(on: boolean): Promise<void> {
+    required = on;
+    const result = await setRequirePasskey(on);
+    if (result.ok) return;
+    required = !on;
+    problem = strings.settings.saveFailed;
+  }
+
   const appearances = [
     { value: 'system', label: strings.settings.system },
     { value: 'light', label: strings.settings.light },
@@ -119,6 +209,40 @@
     {/if}
   </section>
 
+  {#if passkeysSupported}
+    <section aria-labelledby="passkeys-heading">
+      <h3 id="passkeys-heading">{strings.settings.passkeys}</h3>
+      <ul class="identities">
+        {#each passkeys as p (p.id)}
+          <li>
+            <span class="who">{strings.settings.passkeyAdded(addedOn(p))}</span>
+            <button type="button" onclick={() => forget(p)} aria-label={strings.settings.removePasskey(addedOn(p))}>
+              {strings.settings.removeShort}
+            </button>
+          </li>
+        {/each}
+      </ul>
+      {#if passkeyProblem}<p class="error-banner" role="alert">{passkeyProblem}</p>{/if}
+      {#if unfinished}
+        <p class="note">{strings.settings.finishPasskey}</p>
+        <button type="button" class="add" disabled={working} onclick={finishPasskey}>{strings.settings.finish}</button>
+      {:else}
+        <button type="button" class="add" disabled={working} onclick={addPasskey}>{strings.settings.addPasskey}</button>
+      {/if}
+      <label class="require">
+        <input
+          type="checkbox"
+          role="switch"
+          checked={required}
+          disabled={passkeys.length === 0}
+          onchange={(e) => require(e.currentTarget.checked)}
+        />
+        {strings.settings.requirePasskey}
+      </label>
+      <p class="note">{strings.settings.requireNote}</p>
+    </section>
+  {/if}
+
   {#if editing}
     <form class="identity" onsubmit={save} aria-label={editing.id ? strings.settings.edit(editing.email) : strings.settings.addIdentity}>
       <label>
@@ -160,6 +284,19 @@
 </dialog>
 
 <style>
+  .require {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+  }
+
+  .note {
+    margin: 0.25rem 0 0.5rem;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+  }
+
   dialog {
     width: min(36rem, calc(100vw - 2rem));
     max-height: calc(100dvh - 2rem);

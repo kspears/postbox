@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -50,7 +51,11 @@ func newAuth(t *testing.T, server *mail.Server) (*Authenticator, *clock.Clock) {
 	}
 	t.Cleanup(func() { st.Close() })
 	clk := &clock.Clock{}
-	return New(st, clk, server), clk
+	a, err := New(st, clk, server, &url.URL{Scheme: "https", Host: "mail.example.test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return a, clk
 }
 
 func newFakeAuth(t *testing.T) (*Authenticator, *atomic.Int32, *clock.Clock) {

@@ -25,18 +25,47 @@ import (
 )
 
 const usage = `usage: postbox serve
+       postbox passkeys clear <address>
 
 Settings come from POSTBOX_* environment variables; see the README.`
 
 func main() {
-	if len(os.Args) != 2 || os.Args[1] != "serve" {
+	var err error
+	switch args := os.Args[1:]; {
+	case len(args) == 1 && args[0] == "serve":
+		err = serve()
+	case len(args) == 3 && args[0] == "passkeys" && args[1] == "clear":
+		err = clearPasskeys(args[2])
+	default:
 		fmt.Fprintln(os.Stderr, usage)
 		os.Exit(2)
 	}
-	if err := serve(); err != nil {
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// clearPasskeys removes every passkey of the account at address and turns "Require passkey"
+// off, for a person who has lost theirs.
+func clearPasskeys(address string) error {
+	cfg, err := config.FromEnv(os.Getenv)
+	if err != nil {
+		return err
+	}
+	ctx := context.Background()
+	st, err := store.Open(ctx, cfg.State)
+	if err != nil {
+		return fmt.Errorf("POSTBOX_STATE: %w", err)
+	}
+	defer st.Close()
+	account := auth.Account(address)
+	n, err := st.ClearPasskeys(ctx, account)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Cleared %d passkeys for %s. Require passkey is off.\n", n, account)
+	return nil
 }
 
 func serve() error {
@@ -72,6 +101,11 @@ func serve() error {
 		return fmt.Errorf("POSTBOX_STATE: %w", err)
 	}
 
+	authenticator, err := auth.New(st, clk, server, cfg.PublicURL)
+	if err != nil {
+		return err
+	}
+
 	ln, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
 		return fmt.Errorf("cannot listen on POSTBOX_LISTEN: %w", err)
@@ -79,7 +113,7 @@ func serve() error {
 	srv := &http.Server{
 		Handler: api.NewHandler(web.Dist(), api.Deps{
 			Sessions:       sessions,
-			Auth:           auth.New(st, clk, server),
+			Auth:           authenticator,
 			Mail:           pool,
 			Submit:         submit,
 			Outbox:         out,

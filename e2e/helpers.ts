@@ -1,4 +1,5 @@
-import { expect, type APIRequestContext, type Page } from '@playwright/test';
+import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
+import { readFile, rename, writeFile } from 'node:fs/promises';
 
 export const alice = 'alice@example.test';
 export const bob = 'bob@example.test';
@@ -20,7 +21,7 @@ export async function signIn(page: Page, email: string, password: string, keep =
   await page.getByLabel('Email').fill(email);
   await page.getByLabel('Password').fill(password);
   if (keep) await page.getByLabel('Keep me signed in').check();
-  await page.getByRole('button', { name: 'Sign in' }).click();
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
 }
 
 export async function expectInbox(page: Page): Promise<void> {
@@ -140,11 +141,11 @@ function quoted(s: string): string {
 
 /** Runs commands as another IMAP client would, logged in as account, and returns everything the
  * server said. Each command is tagged t1, t2…, and its answer is waited for. */
-export async function imap(account: string, commands: string[]): Promise<string> {
+export async function imap(account: string, commands: string[], password = seedPassword()): Promise<string> {
   const tls = await import('node:tls');
   const fs = await import('node:fs');
   const socket = tls.connect({ host: 'dovecot', port: 993, servername: 'dovecot', ca: fs.readFileSync('/ca/ca.crt') });
-  const all = [`LOGIN ${quoted(account)} ${quoted(seedPassword())}`, ...commands];
+  const all = [`LOGIN ${quoted(account)} ${quoted(password)}`, ...commands];
   return converse(socket, [
     [null, /^\* OK/m],
     ...all.map((c, i): [string, RegExp] => [`t${i} ${c}`, new RegExp(`^t${i} (OK|NO|BAD)`, 'm')]),
@@ -178,4 +179,62 @@ export async function writeMessage(page: Page, to: string, subject: string, body
 /** The MIME types in a message's structure, as another IMAP client sees it. */
 export async function structureOf(account: string, folder: string, subject: string): Promise<string> {
   return (await fetchBySubject(account, folder, subject, 'BODYSTRUCTURE')).toLowerCase();
+}
+
+export async function openSettings(page: Page): Promise<Locator> {
+  await page.getByRole('button', { name: /^Account:/ }).click();
+  await page.getByRole('menuitem', { name: 'Settings' }).click();
+  return page.getByRole('dialog', { name: 'Settings' });
+}
+
+/** Gives page's browser a passkey provider: Chromium's virtual authenticator, which approves
+ * every prompt. Without prf its passkeys cannot give Postbox a key. */
+export async function addAuthenticator(page: Page, prf = true): Promise<void> {
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('WebAuthn.enable');
+  await cdp.send('WebAuthn.addVirtualAuthenticator', {
+    options: {
+      protocol: 'ctap2',
+      ctap2Version: 'ctap2_1',
+      transport: 'internal',
+      hasResidentKey: true,
+      hasUserVerification: true,
+      isUserVerified: true,
+      hasPrf: prf,
+      automaticPresenceSimulation: true,
+    },
+  });
+}
+
+/** Adds a passkey in Settings, through the second prompt when the first gave no key, and
+ * leaves Settings open. */
+export async function addPasskey(page: Page): Promise<Locator> {
+  const settings = await openSettings(page);
+  const listed = settings.getByRole('listitem').filter({ hasText: /^Added / });
+  const before = await listed.count();
+  await settings.getByRole('button', { name: 'Add a passkey' }).click();
+  const finish = settings.getByRole('button', { name: 'Finish' });
+  await expect(listed.nth(before).or(finish)).toBeVisible();
+  if (await finish.isVisible()) await finish.click();
+  await expect(listed).toHaveCount(before + 1);
+  return settings;
+}
+
+/** Changes account's password on the mail server, as its administrator would. The accounts
+ * file is shared with dovecot, which reads it again when it changes. */
+export async function setMailPassword(account: string, password: string): Promise<void> {
+  const file = '/auth/users';
+  const lines = (await readFile(file, 'utf8')).split('\n');
+  const at = lines.findIndex((l) => l.startsWith(`${account}:`));
+  if (at < 0) throw new Error(`no account ${account} in ${file}`);
+  lines[at] = `${account}:{PLAIN}${password}::::::`;
+  await writeFile(`${file}.new`, lines.join('\n'));
+  await rename(`${file}.new`, file);
+  // Dovecot looks at the file at most once a second; a login just after the change may still
+  // see the old password. Wait until it takes the new one. Each refusal slows dovecot's answers
+  // to this address, so the first try waits out the second.
+  for (let wait = 1100; ; wait = 500) {
+    await new Promise((resolve) => setTimeout(resolve, wait));
+    if (/^t0 OK/m.test(await imap(account, [], password))) return;
+  }
 }

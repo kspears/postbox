@@ -1,5 +1,15 @@
 import { expect, test, type BrowserContext } from '@playwright/test';
-import { advanceClock, alice, expectInbox, expectSignInScreen, fromIP, seedPassword, signIn } from '../../helpers';
+import {
+  addAuthenticator,
+  addPasskey,
+  advanceClock,
+  alice,
+  expectInbox,
+  expectSignInScreen,
+  fromIP,
+  seedPassword,
+  signIn,
+} from '../../helpers';
 
 // Criterion 7: session lifetimes. These move Postbox's clock forward for good, so this project
 // runs after every other.
@@ -27,9 +37,29 @@ test('a password session without "Keep me signed in" ends with the browser and a
   await expectSignInScreen(page);
 });
 
-// The passkey case lasts the same 30 days and is added with passkeys (criteria 3-6).
 test('a "Keep me signed in" session lasts 30 days', async ({ page, baseURL }) => {
   await signIn(page, alice, seedPassword(), true);
+  await expectInbox(page);
+  const expires = (await sessionCookie(page.context())).expires;
+  expect(expires * 1000 - Date.now()).toBeGreaterThan(29 * day * 1000);
+
+  await advanceClock(page.request, baseURL!, 30 * day - 60);
+  await page.reload();
+  await expectInbox(page);
+
+  await advanceClock(page.request, baseURL!, 60);
+  await page.reload();
+  await expectSignInScreen(page);
+});
+
+test('a passkey session lasts 30 days', async ({ page, baseURL }) => {
+  await addAuthenticator(page);
+  await signIn(page, 'lasting@example.test', seedPassword());
+  await expectInbox(page);
+  await addPasskey(page);
+  await page.context().clearCookies();
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Sign in with a passkey' }).click();
   await expectInbox(page);
   const expires = (await sessionCookie(page.context())).expires;
   expect(expires * 1000 - Date.now()).toBeGreaterThan(29 * day * 1000);

@@ -10,6 +10,8 @@ export const strings = {
     submit: 'Sign in',
     working: 'Signing in…',
     passwordChanged: 'Your password has changed. Sign in again.',
+    passkey: 'Sign in with a passkey',
+    newPassword: 'Your password has changed. Enter your new password.',
   },
 
   // Keyed by the error codes the server sends.
@@ -17,6 +19,9 @@ export const strings = {
     wrong_credentials: 'Wrong email or password.',
     throttled: 'Too many attempts. Try again in 15 minutes.',
     unreachable: "Can't reach the mail server.",
+    passkey_required: 'This account requires a passkey.',
+    passkey_no_key: "This passkey can't be used here. Sign in with your password.",
+    passkey_failed: "That passkey didn't work. Try again.",
     internal: 'Something went wrong. Try again.',
   },
 
@@ -53,6 +58,16 @@ export const strings = {
     cancel: 'Cancel',
     saveFailed: "Couldn't save the setting. Try again.",
     identityFailed: "Couldn't save the identity. Check the address and try again.",
+    passkeys: 'Passkeys',
+    addPasskey: 'Add a passkey',
+    passkeyAdded: (date: string) => `Added ${date}`,
+    removePasskey: (date: string) => `Remove the passkey added ${date}`,
+    finishPasskey: 'Use the new passkey once more to finish adding it.',
+    finish: 'Finish',
+    passkeyUnsupported: "This passkey can't be used with Postbox. Try a different passkey provider.",
+    passkeyFailed: "Couldn't add the passkey. Try again.",
+    requirePasskey: 'Require passkey',
+    requireNote: 'This protects Postbox only. Your password still works in other mail apps.',
   },
 
   folders: {

@@ -5,11 +5,15 @@ package auth
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net/netip"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/go-webauthn/webauthn/webauthn"
 
 	"github.com/kspears/postbox/internal/clock"
 	"github.com/kspears/postbox/internal/mail"
@@ -44,11 +48,18 @@ type Authenticator struct {
 	// recording the result happen as one step, so parallel requests cannot all slip past the
 	// check before the first failure is written.
 	inFlight keyedMutex
+
+	webauthn *webauthn.WebAuthn
+	pending  ceremonies
 }
 
-// New returns an Authenticator.
-func New(st *store.Store, clk *clock.Clock, server *mail.Server) *Authenticator {
-	return &Authenticator{store: st, clock: clk, server: server}
+// New returns an Authenticator for Postbox served at public.
+func New(st *store.Store, clk *clock.Clock, server *mail.Server, public *url.URL) (*Authenticator, error) {
+	wa, err := newWebAuthn(public)
+	if err != nil {
+		return nil, fmt.Errorf("POSTBOX_PUBLIC_URL: %w", err)
+	}
+	return &Authenticator{store: st, clock: clk, server: server, webauthn: wa}, nil
 }
 
 // Account turns what a person typed into the account name used everywhere else.
@@ -74,12 +85,8 @@ func (a *Authenticator) CheckPassword(ctx context.Context, clientIP netip.Addr, 
 	unlock := a.inFlight.lock(ip)
 	defer unlock()
 
-	blocked, err := a.store.Blocked(ctx, a.clock.Now(), account, ip)
-	if err != nil {
+	if err := a.checkBlocked(ctx, account, ip); err != nil {
 		return err
-	}
-	if blocked {
-		return ErrThrottled
 	}
 	if account == "" || password == "" {
 		return a.fail(ctx, account, ip)
@@ -98,6 +105,18 @@ func (a *Authenticator) CheckPassword(ctx context.Context, clientIP netip.Addr, 
 	// The password is right; failing to tidy the counters must not turn that into an error.
 	if err := a.store.ClearFailures(context.WithoutCancel(ctx), account, ip); err != nil {
 		log.Printf("sign-in: clear failures: %v", err)
+	}
+	return nil
+}
+
+// checkBlocked returns ErrThrottled when account may not sign in from ip now.
+func (a *Authenticator) checkBlocked(ctx context.Context, account, ip string) error {
+	blocked, err := a.store.Blocked(ctx, a.clock.Now(), account, ip)
+	if err != nil {
+		return err
+	}
+	if blocked {
+		return ErrThrottled
 	}
 	return nil
 }

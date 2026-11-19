@@ -193,6 +193,8 @@ services:
       - e2e_state:/e2e/.state
       # To check, as a second mail client would, what Postbox did to a mailbox.
       - ca:/ca:ro
+      # To change a password on the mail server, as its administrator would.
+      - auth:/auth
 
 volumes:
   keys:

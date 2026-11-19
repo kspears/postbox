@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/kspears/postbox/internal/auth"
-	"github.com/kspears/postbox/internal/mail"
 	"github.com/kspears/postbox/internal/session"
 )
 
@@ -83,29 +82,18 @@ func (a *apiHandler) signIn(w http.ResponseWriter, r *http.Request) {
 	}
 	account := auth.Account(req.Email)
 	err := a.Auth.CheckPassword(r.Context(), a.clientIP(r), account, req.Password)
-	switch {
-	case errors.Is(err, auth.ErrWrongPassword):
-		writeError(w, http.StatusUnauthorized, errWrongCredentials)
-		return
-	case errors.Is(err, auth.ErrThrottled):
-		writeError(w, http.StatusTooManyRequests, errThrottled)
-		return
-	case errors.Is(err, mail.ErrUnreachable):
-		log.Printf("sign-in: %v", err)
-		writeError(w, http.StatusBadGateway, errUnreachable)
-		return
-	case err != nil:
-		internalError(w, r, err)
+	if err == nil {
+		// The password is checked first, so a wrong one is never told the account needs a passkey.
+		var required bool
+		required, err = a.Store.PasskeyRequired(r.Context(), account)
+		if err == nil && required {
+			err = auth.ErrPasskeyRequired
+		}
+	}
+	if a.signInFailed(w, r, err) {
 		return
 	}
-	cookie, err := a.Sessions.Create(r.Context(), account, req.Password, session.Password, req.Keep)
-	if err != nil {
-		internalError(w, r, err)
-		return
-	}
-	http.SetCookie(w, cookie)
-	a.Addresses.SeedOnce(mail.Account{ClientIP: a.clientIP(r), Name: account, Password: req.Password})
-	writeJSON(w, http.StatusOK, whoAmI{Account: account, Method: session.Password})
+	a.startSession(w, r, account, req.Password, session.Password, req.Keep)
 }
 
 type sessionHandler func(http.ResponseWriter, *http.Request, *session.Session)

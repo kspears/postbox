@@ -650,6 +650,10 @@ performance panel, median of five tries.
 | What `r` replies to | The latest message of the open conversation that is in the open folder, so the person's own reply in Sent is not answered | Replying to one's own sent copy would address the wrong people | agent default |
 | When shortcuts are inactive | While typing in any field or the composer's body, and while a composer, dialog or menu is open | A key in an open composer is text; a dialog has its own keys | agent default |
 | `e` and `#` with conversations ticked | They act on the ticked conversations; with none ticked, on the open one | As the action bar does | agent default |
+| Passkey enrolment when creation gives no PRF output | Settings shows "Use the new passkey once more to finish adding it." with a "Finish" button, which asks the passkey for its PRF output | Some browsers allow one passkey prompt per click | agent default |
+| Turning "Require passkey" on | Ends the account's other password sessions; the session that turned it on stays | Signing the person out in the middle of Settings would surprise them, and they have just shown they hold the account | agent default |
+| A passkey that does not verify, is not registered, or took longer than two minutes | "That passkey didn't work. Try again." | The spec quotes no text for it | agent default |
+| Passkey wording in Settings | Each passkey is listed as "Added <date>"; its Remove button is named "Remove the passkey added <date>"; a failed enrolment for any other reason says "Couldn't add the passkey. Try again." | The spec quotes no text for these | agent default |
 
 ## Open questions
 
