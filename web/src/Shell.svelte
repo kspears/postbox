@@ -68,14 +68,19 @@
   let generation = 0;
 
   // --- writing ---
-  let composing = $state<{ view: ComposerView; rejected?: string } | null>(null);
+  // problem: why the last attempt to send this message failed.
+  let composing = $state<{ view: ComposerView; problem?: string } | null>(null);
   // Outcomes of earlier sends the person has not been told, from before this page loaded.
   let pageNotices = $state<SendStatus[]>([]);
 
-  async function compose(mode: ComposeMode, folder?: string, uid?: number, rejected?: string): Promise<void> {
+  async function compose(mode: ComposeMode, folder?: string, uid?: number, problem?: string): Promise<void> {
     const result = await fetchComposer(mode, folder, uid);
-    if (!result.ok) return failed(result.error);
-    composing = { view: result.value, rejected };
+    if (!result.ok) {
+      if (result.error === 'sending') notice = { text: strings.compose.inWindow };
+      else failed(result.error);
+      return;
+    }
+    composing = { view: result.value, problem };
   }
 
   function composerClosed(): void {
@@ -84,30 +89,47 @@
     loadFolders(true);
   }
 
-  // After "Send": "Sending…" with Undo for the window, then what became of it. A refusal reopens
-  // the composer with the server's words.
+  // After "Send": "Sending…" with Undo for the window, then what became of it. A failure reopens
+  // the composer saying why. The window runs on the server and does not pause, so the Undo goes
+  // when it ends even while the pointer rests on the notice.
   function sent(id: string): void {
     composing = null;
-    notice = {
+    const sending: Notice = {
       text: strings.compose.sending,
       undo: async () => {
         const back = await undoSend(id);
-        if (back.ok) void compose('draft', back.value.folder, back.value.uid);
-        else notice = { text: back.error === 'too_late' ? strings.compose.sent : strings.actions.failed };
+        if (back.ok) {
+          undone = true;
+          if (notice === mine) notice = null;
+          void compose('draft', back.value.folder, back.value.uid);
+        } else show(back.error === 'too_late' ? { text: strings.compose.sending } : { text: strings.actions.failed });
       },
     };
-    void watchSend(id);
+    // This send's latest notice, as the state holds it (a proxy, not the object assigned); a
+    // newer one for something else is left alone.
+    let mine: Notice | null = null;
+    let undone = false;
+    const show = (n: Notice): void => {
+      if (undone || (notice !== mine && notice !== null)) return;
+      notice = n;
+      mine = notice;
+    };
+    notice = sending;
+    mine = notice;
+    setTimeout(() => show({ text: strings.compose.sending }), 9_000);
+    void watchSend(id, show);
   }
 
-  async function watchSend(id: string): Promise<void> {
+  // Nothing changes before the ten-second undo window ends, so the first look waits it out.
+  async function watchSend(id: string, show: (n: Notice) => void): Promise<void> {
     for (let tries = 0; tries < 600; tries++) {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      await new Promise((resolve) => setTimeout(resolve, tries === 0 ? 10_000 : 1000));
       const status = await sendStatus(id);
       if (!status.ok) return; // undone, or told elsewhere
       const s = status.value;
       if (s.state === 'waiting' || s.state === 'submitting') continue;
-      if (s.state === 'failed') void compose('draft', s.draftsFolder, s.draftUid, s.error);
-      else notice = { text: s.state === 'sent' ? strings.compose.sent : s.state === 'sent_no_copy' ? strings.compose.sentNoCopy : strings.compose.maybeSent };
+      if (s.state === 'failed') void compose('draft', s.draftsFolder, s.draftUid, failureText(s, strings.compose.rejected));
+      else show({ text: noticeText(s) });
       void dismissNotice(id);
       loadFolders(true);
       if (currentFolder?.role === 'sent' || currentFolder?.role === 'drafts') refreshList();
@@ -115,14 +137,22 @@
     }
   }
 
+  // Why a send failed: the server's words after prefix when it refused the message, else ours.
+  function failureText(n: SendStatus, prefix: string): string {
+    if (n.reason === 'rejected') return `${prefix} ${n.error ?? ''}`;
+    return n.reason ? strings.compose.failure[n.reason] : strings.actions.failed;
+  }
+
   function noticeText(n: SendStatus): string {
     switch (n.state) {
       case 'failed':
-        return `${strings.compose.failedLater} ${n.error ?? ''}`;
+        return n.reason === 'rejected' ? failureText(n, strings.compose.failedLater) : `${strings.compose.failedLater} ${failureText(n, '')}`;
       case 'unsent':
         return strings.compose.unsent;
       case 'unknown':
         return strings.compose.maybeSent;
+      case 'sent':
+        return strings.compose.sent;
       default:
         return strings.compose.sentNoCopy;
     }
@@ -726,7 +756,7 @@
   {#key composing}
     <Composer
       view={composing.view}
-      rejected={composing.rejected}
+      problem={composing.problem}
       onSent={sent}
       onClose={composerClosed}
       onError={failed}

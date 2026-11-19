@@ -15,7 +15,7 @@ const (
 // Respond starts a draft answering o: a reply to its sender, a reply to everyone, or a
 // forward. me is the account's own address, left out of a reply to everyone.
 func Respond(o *Original, mode string, me Person) *Draft {
-	d := &Draft{From: me, To: []Person{}, Cc: []Person{}, Bcc: []Person{}, Attachments: []Attachment{}}
+	d := NewDraft(me)
 	if mode == ModeForward {
 		d.Subject = prefixed("Fwd:", o.Subject)
 		d.Text = "\n\n---------- Forwarded message ----------\n" +
@@ -24,10 +24,7 @@ func Respond(o *Original, mode string, me Person) *Draft {
 			"Subject: " + o.Subject + "\n" +
 			"To: " + list(o.To) + "\n" +
 			ccLine(o.Cc) + "\n" + o.Text
-		d.Attachments = slices.Clone(o.Attachments)
-		if d.Attachments == nil {
-			d.Attachments = []Attachment{}
-		}
+		d.Attachments = append(d.Attachments, o.Attachments...)
 		return d
 	}
 

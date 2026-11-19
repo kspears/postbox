@@ -1,10 +1,11 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
+	netmail "net/mail"
 	"slices"
-	"sync"
 	"time"
 
 	"github.com/emersion/go-imap/v2"
@@ -16,7 +17,11 @@ import (
 	"github.com/kspears/postbox/internal/store"
 )
 
-const errTooLate = "too_late"
+const (
+	errTooLate = "too_late"
+	// errSending: the draft is in its undo window; "Undo" is the way back to it.
+	errSending = "sending"
+)
 
 // What a composer opens with.
 type composerView struct {
@@ -24,32 +29,6 @@ type composerView struct {
 	Identities []compose.Person `json:"identities"`
 	// SizeLimit is the largest message the submission server accepts, in bytes; 0 when unknown.
 	SizeLimit int64 `json:"sizeLimit"`
-}
-
-// sizeLimit asks the submission server once per account and remembers the answer.
-type sizeLimits struct {
-	mu     sync.Mutex
-	limits map[string]int64
-}
-
-func (l *sizeLimits) get(r *http.Request, a *apiHandler, s *session.Session) int64 {
-	l.mu.Lock()
-	n, ok := l.limits[s.Account]
-	l.mu.Unlock()
-	if ok {
-		return n
-	}
-	n, err := a.Submit.SizeLimit(r.Context(), a.clientIP(r), s.Account, s.Password)
-	if err != nil {
-		return 0
-	}
-	l.mu.Lock()
-	if l.limits == nil {
-		l.limits = map[string]int64{}
-	}
-	l.limits[s.Account] = n
-	l.mu.Unlock()
-	return n
 }
 
 func me(s *session.Session) compose.Person { return compose.Person{Email: s.Account} }
@@ -67,12 +46,22 @@ func (a *apiHandler) composer(w http.ResponseWriter, r *http.Request, s *session
 	}
 	view := composerView{Identities: []compose.Person{me(s)}}
 	if mode == "new" {
-		view.Draft = &compose.Draft{From: me(s), To: []compose.Person{}, Cc: []compose.Person{}, Bcc: []compose.Person{}, Attachments: []compose.Attachment{}}
+		view.Draft = compose.NewDraft(me(s))
 	} else if !a.withMail(w, r, s, func(c *mail.Conn) error {
 		if mode == "draft" && folder == "" {
 			var err error
 			if folder, err = c.RoleFolder(mail.RoleDrafts); err != nil {
 				return err
+			}
+		}
+		if mode == "draft" {
+			// Saving the draft from a composer would replace the copy the outbox is about to send.
+			waiting, err := a.Store.SendWaiting(r.Context(), s.Account, folder, uint32(uid))
+			if err != nil {
+				return err
+			}
+			if waiting {
+				return errDraftSending
 			}
 		}
 		raw, err := c.Raw(folder, uid)
@@ -95,35 +84,54 @@ func (a *apiHandler) composer(w http.ResponseWriter, r *http.Request, s *session
 	}) {
 		return
 	}
-	view.SizeLimit = a.sizes.get(r, a, s)
+	view.SizeLimit = a.Submit.SizeLimit(r.Context())
 	writeJSON(w, http.StatusOK, view)
 }
 
+var errDraftSending = errors.New("the draft is being sent")
+
 // readDraft reads a composer's content from the request and makes it the account's own: the
-// sender is the account (identities come later) and the rest is checked for size.
+// sender is the account (identities come later) and the rest is checked for size and for
+// attachments that name a real part.
 func readDraft(w http.ResponseWriter, r *http.Request, s *session.Session) (*compose.Draft, bool) {
 	var d compose.Draft
-	r.Body = http.MaxBytesReader(w, r.Body, 64<<20)
-	if !decode(w, r, &d) {
+	if !decodeUpTo(w, r, &d, 64<<20) {
 		return nil, false
 	}
 	d.From = me(s)
-	if len(d.Subject) > 1000 || len(d.To)+len(d.Cc)+len(d.Bcc) > 500 {
+	ok := len(d.Subject) <= 1000 && len(d.To)+len(d.Cc)+len(d.Bcc) <= 500
+	for _, p := range slices.Concat(d.To, d.Cc, d.Bcc) {
+		parsed, err := netmail.ParseAddress(p.Email)
+		ok = ok && err == nil && parsed.Address == p.Email && parsed.Name == ""
+	}
+	for _, at := range d.Attachments {
+		ok = ok && (at.Data != nil || (at.Folder != "" && at.UID != 0 && validPart(at.Part)))
+	}
+	if !ok {
 		writeError(w, http.StatusBadRequest, errBadRequest)
 		return nil, false
 	}
 	return &d, true
 }
 
-// saveDraft builds d and stores it in Drafts in place of its previous copy.
-func saveDraft(c *mail.Conn, d *compose.Draft) (string, imap.UID, error) {
-	raw, err := compose.Build(d, time.Now(), true, func(at compose.Attachment) ([]byte, error) {
-		return c.Part(at.Folder, imap.UID(at.UID), at.Part)
+// saveDraft builds d and stores it in Drafts in place of its previous copy, answering the
+// request itself when that fails. It returns where the draft is now; d's attachments then
+// point into that copy, as the one they came from may be gone.
+func (a *apiHandler) saveDraft(w http.ResponseWriter, r *http.Request, s *session.Session, d *compose.Draft) (folder string, uid imap.UID, ok bool) {
+	ok = a.withMail(w, r, s, func(c *mail.Conn) error {
+		raw, err := compose.Build(d, time.Now(), func(at compose.Attachment) ([]byte, error) {
+			return c.Part(at.Folder, imap.UID(at.UID), at.Part)
+		})
+		if err != nil {
+			return err
+		}
+		folder, uid, err = c.SaveDraft(raw, imap.UID(d.UID))
+		if err == nil {
+			d.Attachments = compose.Saved(d, folder, uint32(uid))
+		}
+		return err
 	})
-	if err != nil {
-		return "", 0, err
-	}
-	return c.SaveDraft(raw, imap.UID(d.UID))
+	return folder, uid, ok
 }
 
 // saveDraftHandler answers POST /api/drafts with the composer's content: it saves the draft and
@@ -133,13 +141,8 @@ func (a *apiHandler) saveDraftHandler(w http.ResponseWriter, r *http.Request, s 
 	if !ok {
 		return
 	}
-	var folder string
-	var uid imap.UID
-	if a.withMail(w, r, s, func(c *mail.Conn) (err error) {
-		folder, uid, err = saveDraft(c, d)
-		return err
-	}) {
-		writeJSON(w, http.StatusOK, map[string]any{"folder": folder, "uid": uid, "messageId": d.MessageID})
+	if _, uid, ok := a.saveDraft(w, r, s, d); ok {
+		writeJSON(w, http.StatusOK, map[string]any{"uid": uid, "messageId": d.MessageID, "attachments": d.Attachments})
 	}
 }
 
@@ -164,16 +167,14 @@ func (a *apiHandler) send(w http.ResponseWriter, r *http.Request, s *session.Ses
 	if !ok {
 		return
 	}
+	// Once the message has arrived, a closed tab must not stop it from being queued.
+	r = r.WithContext(context.WithoutCancel(r.Context()))
 	if len(d.Recipients()) == 0 {
 		writeError(w, http.StatusBadRequest, errBadRequest)
 		return
 	}
-	var folder string
-	var uid imap.UID
-	if !a.withMail(w, r, s, func(c *mail.Conn) (err error) {
-		folder, uid, err = saveDraft(c, d)
-		return err
-	}) {
+	folder, uid, ok := a.saveDraft(w, r, s, d)
+	if !ok {
 		return
 	}
 	id, err := a.Outbox.Queue(r.Context(), a.account(r, s), folder, uid)
@@ -181,7 +182,7 @@ func (a *apiHandler) send(w http.ResponseWriter, r *http.Request, s *session.Ses
 		internalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"id": id, "folder": folder, "uid": uid})
+	writeJSON(w, http.StatusOK, map[string]any{"id": id})
 }
 
 // undoSend answers POST /api/send/undo {"id"}: within the window, the message stays a draft.

@@ -78,8 +78,9 @@ async function converse(socket: import('node:net').Socket, steps: [send: string 
   return transcript;
 }
 
-/** Delivers a message to an account the way mail from outside arrives: SMTP on port 25. */
-export async function deliver(to: string, subject: string, body: string): Promise<void> {
+/** Delivers a message to an account the way mail from outside arrives: SMTP on port 25. headers
+ * go after the usual ones, such as a Content-Type for a multipart body. */
+export async function deliver(to: string, subject: string, body: string, headers: string[] = []): Promise<void> {
   const net = await import('node:net');
   const socket = net.connect(25, 'postfix');
   const message = [
@@ -88,6 +89,7 @@ export async function deliver(to: string, subject: string, body: string): Promis
     `Subject: ${subject}`,
     `Date: ${new Date().toUTCString()}`,
     `Message-ID: <${Date.now()}.${Math.random().toString(36).slice(2)}@example.org>`,
+    ...headers,
     '',
     body,
     '.',
@@ -103,12 +105,18 @@ export async function deliver(to: string, subject: string, body: string): Promis
   ]);
 }
 
+/** What another IMAP client fetches (items, such as FLAGS) of the message with subject in one of
+ * account's folders. */
+export async function fetchBySubject(account: string, folder: string, subject: string, items: string): Promise<string> {
+  const found = await imap(account, [`EXAMINE ${quoted(folder)}`, `SEARCH SUBJECT ${quoted(subject)}`]);
+  const id = /^\* SEARCH (\d+)/m.exec(found)?.[1];
+  if (!id) throw new Error(`no message "${subject}" in ${account}'s ${folder}`);
+  return imap(account, [`EXAMINE ${quoted(folder)}`, `FETCH ${id} ${items}`]);
+}
+
 /** The flags of the message with subject in account's Inbox, as another IMAP client sees them. */
 export async function imapFlags(account: string, subject: string): Promise<string> {
-  const found = await imap(account, ['EXAMINE INBOX', `SEARCH SUBJECT ${quoted(subject)}`]);
-  const id = /^\* SEARCH (\d+)/m.exec(found)?.[1];
-  if (!id) throw new Error(`no message "${subject}" in ${account}'s Inbox`);
-  const flags = await imap(account, ['EXAMINE INBOX', `FETCH ${id} FLAGS`]);
+  const flags = await fetchBySubject(account, 'INBOX', subject, 'FLAGS');
   return /FLAGS \(([^)]*)\)/.exec(flags)?.[1] ?? '';
 }
 
@@ -156,9 +164,5 @@ export async function writeMessage(page: Page, to: string, subject: string, body
 
 /** The MIME types in a message's structure, as another IMAP client sees it. */
 export async function structureOf(account: string, folder: string, subject: string): Promise<string> {
-  const out = await imap(account, [`EXAMINE ${quoted(folder)}`, `SEARCH SUBJECT ${quoted(subject)}`]);
-  const id = /^\* SEARCH (\d+)/m.exec(out)?.[1];
-  if (!id) return '';
-  const fetched = await imap(account, [`EXAMINE ${quoted(folder)}`, `FETCH ${id} BODYSTRUCTURE`]);
-  return fetched.toLowerCase();
+  return (await fetchBySubject(account, folder, subject, 'BODYSTRUCTURE')).toLowerCase();
 }

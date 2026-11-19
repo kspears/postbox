@@ -147,8 +147,7 @@ func TestSubmitConversation(t *testing.T) {
 		t.Errorf("wrong password: got %v", err)
 	}
 
-	limit, err := submit.SizeLimit(context.Background(), ip, "a@example.test", "pw")
-	if err != nil || limit != 1000 {
-		t.Errorf("size limit %d, %v", limit, err)
+	if limit := submit.SizeLimit(context.Background()); limit != 1000 {
+		t.Errorf("size limit %d", limit)
 	}
 }

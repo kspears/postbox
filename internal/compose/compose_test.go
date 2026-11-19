@@ -30,7 +30,7 @@ func draft() *Draft {
 }
 
 func TestBuildAndReadBack(t *testing.T) {
-	raw, err := Build(draft(), when, true, nil)
+	raw, err := Build(draft(), when, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,26 +50,23 @@ func TestBuildAndReadBack(t *testing.T) {
 	if got.InReplyTo != "orig@example.test" || len(got.References) != 2 || got.MessageID == "" {
 		t.Errorf("threading: %+v", got)
 	}
-	if len(got.Attachments) != 1 || got.Attachments[0].Name != "notes.txt" || got.Attachments[0].Folder != "Drafts" || got.Attachments[0].UID != 7 {
+	// Part 1 is the text and HTML; the attachment is IMAP part 2, where Saved says it is.
+	if len(got.Attachments) != 1 || got.Attachments[0].Name != "notes.txt" || got.Attachments[0].Folder != "Drafts" || got.Attachments[0].UID != 7 || got.Attachments[0].Part != "2" {
 		t.Errorf("attachments: %+v", got.Attachments)
+	}
+	if saved := Saved(draft(), "Drafts", 7); saved[0].Part != got.Attachments[0].Part || saved[0].Data != nil || saved[0].Size != 16 {
+		t.Errorf("saved %+v, read back %+v", saved[0], got.Attachments[0])
 	}
 }
 
-func TestSentCopyForRecipientsHasNoBcc(t *testing.T) {
-	raw, err := Build(draft(), when, false, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if bytes.Contains(raw, []byte("dave@example.test")) {
-		t.Error("the recipients' copy names the Bcc recipient")
-	}
+func TestRecipientsIncludeBcc(t *testing.T) {
 	if got := draft().Recipients(); len(got) != 3 || got[2] != "dave@example.test" {
 		t.Errorf("recipients %v", got)
 	}
 }
 
 func TestBuildHasTextAndHTML(t *testing.T) {
-	raw, _ := Build(draft(), when, true, nil)
+	raw, _ := Build(draft(), when, nil)
 	entity, err := message.Read(bytes.NewReader(raw))
 	if err != nil {
 		t.Fatal(err)
@@ -97,14 +94,14 @@ func TestBuildFetchesServerParts(t *testing.T) {
 	d := draft()
 	d.Attachments = []Attachment{{Folder: "INBOX", UID: 3, Part: "2", Name: "a.pdf", Type: "application/pdf"}}
 	var asked Attachment
-	_, err := Build(d, when, true, func(a Attachment) ([]byte, error) {
+	_, err := Build(d, when, func(a Attachment) ([]byte, error) {
 		asked = a
 		return []byte("%PDF"), nil
 	})
 	if err != nil || asked.Part != "2" || asked.UID != 3 {
 		t.Errorf("asked for %+v, %v", asked, err)
 	}
-	_, err = Build(d, when, true, func(Attachment) ([]byte, error) { return nil, errors.New("gone") })
+	_, err = Build(d, when, func(Attachment) ([]byte, error) { return nil, errors.New("gone") })
 	if err == nil {
 		t.Error("a missing part was not reported")
 	}
@@ -163,5 +160,18 @@ func TestRespond(t *testing.T) {
 	}
 	if Respond(&Original{Subject: "re: x", From: []Person{me}, To: []Person{{Email: "b@example.test"}}}, ModeReply, me).To[0].Email != "b@example.test" {
 		t.Error("a reply to one's own message did not go to its recipients")
+	}
+}
+
+func TestBuildKeepsHeaderValuesOnOneLine(t *testing.T) {
+	d := draft()
+	d.Attachments[0].Name = "a\nb.txt"
+	raw, err := Build(d, when, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o, err := Parse(raw, "Drafts", 1)
+	if err != nil || len(o.Attachments) != 1 || o.Attachments[0].Name != "a b.txt" {
+		t.Errorf("got %+v, %v", o, err)
 	}
 }

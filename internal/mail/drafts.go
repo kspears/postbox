@@ -1,8 +1,12 @@
 package mail
 
 import (
+	"bufio"
 	"bytes"
+	"errors"
 	"io"
+	"net/textproto"
+	"slices"
 	"time"
 
 	"github.com/emersion/go-imap/v2"
@@ -84,5 +88,29 @@ func (c *Conn) appendMessage(folder string, msg []byte, flags []imap.Flag) (imap
 	if err != nil {
 		return 0, err
 	}
-	return data.UID, nil
+	if data.UID != 0 {
+		return data.UID, nil
+	}
+	// Without UIDPLUS the server does not say where the message went; find it by Message-ID.
+	return c.findByMessageID(folder, msg)
+}
+
+func (c *Conn) findByMessageID(folder string, msg []byte) (imap.UID, error) {
+	header, err := textproto.NewReader(bufio.NewReader(bytes.NewReader(msg))).ReadMIMEHeader()
+	id := header.Get("Message-Id")
+	if err != nil || id == "" {
+		return 0, errors.New("the server did not say where it saved the message")
+	}
+	if _, err := c.Client.Select(folder, nil).Wait(); err != nil {
+		return 0, err
+	}
+	found, err := c.UIDSearch(&imap.SearchCriteria{Header: []imap.SearchCriteriaHeaderField{{Key: "Message-ID", Value: id}}}, nil).Wait()
+	if err != nil {
+		return 0, err
+	}
+	uids := found.AllUIDs()
+	if len(uids) == 0 {
+		return 0, ErrNotFound
+	}
+	return slices.Max(uids), nil
 }

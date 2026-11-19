@@ -2,7 +2,7 @@
   import type { Snippet } from 'svelte';
   import { attachmentURL, conversation, markRead, type ErrorCode, type Message, type Person } from './api';
   import MessageBody from './MessageBody.svelte';
-  import { strings } from './strings';
+  import { fileSize, strings } from './strings';
 
   interface Props {
     account: string;
@@ -71,14 +71,6 @@
   }
 
   const long = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
-
-  function size(bytes: number): string {
-    // The encoded size; the file is about three quarters of it.
-    const n = (bytes * 3) / 4;
-    if (n < 1024) return `${Math.max(1, Math.round(n))} B`;
-    if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
-    return `${(n / 1024 / 1024).toFixed(1)} MB`;
-  }
 </script>
 
 <section class="reading" aria-label="Reading pane">
@@ -129,7 +121,7 @@
               <li>
                 <a href={attachmentURL(m, a.part)} download={a.name} aria-label={strings.reading.download(a.name)}>
                   <span class="file">{a.name}</span>
-                  <span class="size">{size(a.size)}</span>
+                  <span class="size">{fileSize((a.size * 3) / 4)}</span>
                 </a>
               </li>
             {/each}

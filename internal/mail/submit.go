@@ -11,6 +11,7 @@ import (
 	"net/textproto"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -28,18 +29,21 @@ type Submitter struct {
 	TLS  *tls.Config
 	// implicitTLS: the connection is TLS from the first byte (port 465), not upgraded by STARTTLS.
 	implicitTLS bool
+
+	mu        sync.Mutex
+	size      int64     // the server's SIZE limit, once known
+	sizeAsked time.Time // when it was last asked for; zero until then
 }
 
 // NewSubmitter returns a Submitter for addr. Port 465 speaks TLS from the first byte; any other
 // port must offer STARTTLS, which is required. Certificates are checked as for IMAP.
 func NewSubmitter(addr string, imap *Server) (*Submitter, error) {
-	host, _, err := net.SplitHostPort(addr)
+	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return nil, err
 	}
 	cfg := imap.TLS.Clone()
 	cfg.ServerName = host
-	_, port, _ := net.SplitHostPort(addr)
 	return &Submitter{Addr: addr, TLS: cfg, implicitTLS: port == "465"}, nil
 }
 
@@ -51,7 +55,6 @@ type Envelope struct {
 
 // session is one conversation with the submission server, ready for MAIL FROM.
 type session struct {
-	conn net.Conn
 	text *textproto.Conn
 	ext  map[string]string // EHLO extensions, upper case, with their parameters
 }
@@ -81,9 +84,26 @@ func (s *session) ehlo() error {
 	return nil
 }
 
-// open connects, secures the connection, says who the person is (XCLIENT, when the server
-// lets Postbox) and logs in.
+// open connects (see connect) and logs in.
 func (sub *Submitter) open(ctx context.Context, clientIP netip.Addr, account, password string) (*session, error) {
+	s, err := sub.connect(ctx, clientIP)
+	if err != nil {
+		return nil, err
+	}
+	plain := base64.StdEncoding.EncodeToString([]byte("\x00" + account + "\x00" + password))
+	if code, msg, err := s.cmd(235, "AUTH PLAIN %s", plain); err != nil {
+		s.close()
+		if code == 535 {
+			return nil, ErrRefused
+		}
+		return nil, fmt.Errorf("%w: %d %s", ErrUnreachable, code, msg)
+	}
+	return s, nil
+}
+
+// connect connects, secures the connection and says who the person is (XCLIENT, when the
+// server lets Postbox and clientIP is known).
+func (sub *Submitter) connect(ctx context.Context, clientIP netip.Addr) (*session, error) {
 	dialer := &net.Dialer{Timeout: 10 * time.Second}
 	var conn net.Conn
 	var err error
@@ -100,7 +120,7 @@ func (sub *Submitter) open(ctx context.Context, clientIP netip.Addr, account, pa
 		deadline = time.Now().Add(2 * time.Minute)
 	}
 	conn.SetDeadline(deadline)
-	s := &session{conn: conn, text: textproto.NewConn(conn)}
+	s := &session{text: textproto.NewConn(conn)}
 	fail := func(err error) (*session, error) {
 		s.close()
 		var tpErr *textproto.Error
@@ -127,7 +147,7 @@ func (sub *Submitter) open(ctx context.Context, clientIP netip.Addr, account, pa
 		if err := secure.HandshakeContext(ctx); err != nil {
 			return fail(err)
 		}
-		s.conn, s.text = secure, textproto.NewConn(secure)
+		s.text = textproto.NewConn(secure)
 		if err := s.ehlo(); err != nil {
 			return fail(err)
 		}
@@ -147,27 +167,30 @@ func (sub *Submitter) open(ctx context.Context, clientIP netip.Addr, account, pa
 			return fail(err)
 		}
 	}
-	plain := base64.StdEncoding.EncodeToString([]byte("\x00" + account + "\x00" + password))
-	if code, msg, err := s.cmd(235, "AUTH PLAIN %s", plain); err != nil {
-		s.close()
-		if code == 535 {
-			return nil, ErrRefused
-		}
-		return nil, fmt.Errorf("%w: %d %s", ErrUnreachable, code, msg)
-	}
 	return s, nil
 }
 
-// SizeLimit returns the largest message the server accepts, in bytes, or 0 when it states none.
-func (sub *Submitter) SizeLimit(ctx context.Context, clientIP netip.Addr, account, password string) (int64, error) {
-	s, err := sub.open(ctx, clientIP, account, password)
+// SizeLimit returns the largest message the server accepts, in bytes, or 0 when it states none
+// or cannot be reached. The limit is the server's, the same for everyone, so it is asked for
+// once; after a failure, again a minute later at the earliest.
+func (sub *Submitter) SizeLimit(ctx context.Context) int64 {
+	sub.mu.Lock()
+	defer sub.mu.Unlock()
+	if sub.size > 0 || time.Since(sub.sizeAsked) < time.Minute {
+		return sub.size
+	}
+	sub.sizeAsked = time.Now()
+	// A request that goes away must not count as the server failing to answer.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	s, err := sub.connect(ctx, netip.Addr{})
 	if err != nil {
-		return 0, err
+		return 0
 	}
 	defer s.close()
 	s.cmd(221, "QUIT")
-	n, _ := strconv.ParseInt(strings.TrimSpace(s.ext["SIZE"]), 10, 64)
-	return n, nil
+	sub.size, _ = strconv.ParseInt(strings.TrimSpace(s.ext["SIZE"]), 10, 64)
+	return sub.size
 }
 
 // Send submits a message. Before the first byte of the message is sent, sending is called: from

@@ -592,6 +592,9 @@ performance panel, median of five tries.
 | Folder names typed in Postbox | No `/`, `.`, `\`, `%`, `*`, `"` or control characters | Servers use them to separate or match folder names | agent default |
 | Undo notice wording | "Conversation archived.", "Conversation moved to Trash.", "Conversation reported as spam.", "Conversation moved to Inbox.", "Conversation moved to <folder>." ("<n> conversations …" for several) | The spec named only the "Undo" action | agent default |
 | Undo notice timing | Ten seconds, paused while the pointer or keyboard focus is on it | Reaching for "Undo" must not be a race (WCAG 2.2.1) | agent default |
+| Undo for "Send" | Ten seconds on the server's clock, not paused; the Undo goes when the window ends, and "Sending…" stays until the outcome | The send goes ahead with the tab closed, so the window cannot wait on the page | agent default |
+| A draft opened during its send | Not opened; "This message is being sent. Use Undo to change it." | Saving it would replace the copy being sent | agent default |
+| Submission server briefly unreachable | One more try two seconds later, if none of the message had gone; then "could not be reached" and the message stays in Drafts | Rides out a restart or a dropped connection without risking a double send | agent default |
 | HTML part of a plain-text message | Made from the text: escaped, line breaks kept, links and quoted lines marked | Every message goes out with both parts, as criterion 21 asks, before the rich-text editor exists | agent default |
 | Reply to one's own message | Goes to the original recipients, or back to oneself when there were none | Matches other mail clients | agent default |
 | Submission port | 465 is TLS from the start; any other port must offer STARTTLS, which is used | No plaintext submission | agent default |

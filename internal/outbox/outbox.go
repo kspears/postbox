@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"log"
 	"strings"
@@ -35,6 +34,9 @@ const (
 // Window is how long "Undo" is offered after "Send".
 var Window = 10 * time.Second
 
+// retryAfter is the pause before a second try when the submission server could not be reached.
+const retryAfter = 2 * time.Second
+
 // ErrTooLate means the undo window has passed.
 var ErrTooLate = errors.New("the message is already on its way")
 
@@ -61,9 +63,11 @@ func New(ctx context.Context, st *store.Store, pool *mail.Pool, submit *mail.Sub
 // the window ends, the message is sent with acct's password, which the outbox holds in memory
 // only until then.
 func (o *Outbox) Queue(ctx context.Context, acct mail.Account, draftsFolder string, uid imap.UID) (string, error) {
-	b := make([]byte, 12)
-	rand.Read(b)
-	id := hex.EncodeToString(b)
+	id := rand.Text()
+	// Sends that went out a while ago have been reported, or nobody is left to report them to.
+	if err := o.store.DeleteSentBefore(ctx, acct.Name, time.Now().Add(-time.Hour)); err != nil {
+		return "", err
+	}
 	err := o.store.AddSend(ctx, store.Send{
 		ID: id, Account: acct.Name, DraftsFolder: draftsFolder, DraftUID: uint32(uid), State: Waiting, CreatedAt: time.Now(),
 	})
@@ -100,21 +104,33 @@ func (o *Outbox) Status(ctx context.Context, account, id string) (store.Send, er
 	return o.store.GetSend(ctx, account, id)
 }
 
+// Why a send failed; see store.Send.Reason.
+const (
+	Rejected    = "rejected"
+	Refused     = "refused"
+	Unreachable = "unreachable"
+	Unreadable  = "unreadable"
+	Invalid     = "invalid"
+)
+
+// outcome is what became of a send: its final state and, for a failure, why, with the server's
+// words when it refused the message.
+type outcome struct{ state, reason, text string }
+
 func (o *Outbox) send(id string, acct mail.Account, draftsFolder string, uid imap.UID) {
 	o.mu.Lock()
 	delete(o.waiting, id)
 	o.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	state, errText := o.deliver(ctx, id, acct, draftsFolder, uid)
-	if err := o.store.SetSendState(context.Background(), id, state, errText); err != nil {
-		log.Printf("outbox %s: record %s: %v", id, state, err)
+	out := o.deliver(ctx, id, acct, draftsFolder, uid)
+	if err := o.store.SetSendState(context.Background(), id, out.state, out.reason, out.text); err != nil {
+		log.Printf("outbox %s: record %s: %v", id, out.state, err)
 	}
 }
 
-// deliver hands the draft to the submission server and files the Sent copy. It returns the
-// send's final state and, on failure, the words to show.
-func (o *Outbox) deliver(ctx context.Context, id string, acct mail.Account, draftsFolder string, uid imap.UID) (string, string) {
+// deliver hands the draft to the submission server and files the Sent copy.
+func (o *Outbox) deliver(ctx context.Context, id string, acct mail.Account, draftsFolder string, uid imap.UID) outcome {
 	var raw []byte
 	err := o.pool.Do(ctx, acct, func(c *mail.Conn) (err error) {
 		raw, err = c.Raw(draftsFolder, uid)
@@ -122,47 +138,58 @@ func (o *Outbox) deliver(ctx context.Context, id string, acct mail.Account, draf
 	})
 	if err != nil {
 		log.Printf("outbox %s: read draft: %v", id, err)
-		return Failed, "The draft could not be read."
+		return outcome{Failed, Unreadable, ""}
 	}
 	env, forRecipients, err := envelope(raw)
 	if err != nil {
-		return Failed, err.Error()
+		log.Printf("outbox %s: %v", id, err)
+		return outcome{Failed, Invalid, ""}
 	}
 
 	started := false
-	err = o.submit.Send(ctx, acct.ClientIP, acct.Name, acct.Password, env, forRecipients, func() {
-		started = true
-		// Recorded before the first byte goes, so a stop from here on is known to be ambiguous.
-		if err := o.store.SetSendState(ctx, id, Submitting, ""); err != nil {
-			log.Printf("outbox %s: record submitting: %v", id, err)
+	submit := func() error {
+		return o.submit.Send(ctx, acct.ClientIP, acct.Name, acct.Password, env, forRecipients, func() {
+			started = true
+			// Recorded before the first byte goes, so a stop from here on is known to be ambiguous.
+			if err := o.store.SetSendState(ctx, id, Submitting, "", ""); err != nil {
+				log.Printf("outbox %s: record submitting: %v", id, err)
+			}
+		})
+	}
+	err = submit()
+	// A server that could not be reached, or answered "try again later", before any of the
+	// message went is asked once more.
+	if errors.Is(err, mail.ErrUnreachable) && !started {
+		log.Printf("outbox %s: %v; trying again", id, err)
+		select {
+		case <-time.After(retryAfter):
+			err = submit()
+		case <-ctx.Done():
 		}
-	})
+	}
 	var rejected *mail.Rejected
 	switch {
 	case errors.As(err, &rejected):
-		return Failed, rejected.Text
+		return outcome{Failed, Rejected, rejected.Text}
 	case errors.Is(err, mail.ErrRefused):
-		return Failed, "The mail server refused the password."
+		return outcome{Failed, Refused, ""}
 	case err != nil && started:
 		log.Printf("outbox %s: %v", id, err)
-		return Unknown, ""
+		return outcome{Unknown, "", ""}
 	case err != nil:
 		log.Printf("outbox %s: %v", id, err)
-		return Failed, "The mail server could not be reached."
+		return outcome{Failed, Unreachable, ""}
 	}
 
 	// Sent. The copy goes to Sent with its Bcc line, as the sender should see it.
-	err = o.pool.Do(ctx, acct, func(c *mail.Conn) error {
-		if err := c.FileSent(raw); err != nil {
-			return err
-		}
-		return c.DiscardDraft(draftsFolder, uid)
-	})
-	if err != nil {
+	if err := o.pool.Do(ctx, acct, func(c *mail.Conn) error { return c.FileSent(raw) }); err != nil {
 		log.Printf("outbox %s: file in Sent: %v", id, err)
-		return SentNoCopy, ""
+		return outcome{SentNoCopy, "", ""}
 	}
-	return Sent, ""
+	if err := o.pool.Do(ctx, acct, func(c *mail.Conn) error { return c.DiscardDraft(draftsFolder, uid) }); err != nil {
+		log.Printf("outbox %s: remove the draft: %v", id, err)
+	}
+	return outcome{Sent, "", ""}
 }
 
 // envelope reads who a saved message is from and to, and returns the copy the recipients get:
@@ -177,17 +204,21 @@ func envelope(raw []byte) (mail.Envelope, []byte, error) {
 	if from, err := h.AddressList("From"); err == nil && len(from) == 1 {
 		env.From = from[0].Address
 	}
+	seen := map[string]bool{}
 	for _, key := range []string{"To", "Cc", "Bcc"} {
 		addrs, _ := h.AddressList(key)
 		for _, a := range addrs {
-			env.To = append(env.To, a.Address)
+			if k := strings.ToLower(a.Address); !seen[k] {
+				seen[k] = true
+				env.To = append(env.To, a.Address)
+			}
 		}
 	}
 	if env.From == "" {
-		return env, nil, errors.New("The message has no sender.")
+		return env, nil, errors.New("the message has no sender")
 	}
 	if len(env.To) == 0 {
-		return env, nil, errors.New("The message has no recipients.")
+		return env, nil, errors.New("the message has no recipients")
 	}
 	return env, withoutBcc(raw), nil
 }

@@ -1,17 +1,17 @@
 <script lang="ts">
-  import { discardDraft, saveDraft, send, type ComposerView, type Draft, type ErrorCode } from './api';
+  import { discardDraft, saveDraft, send, type ComposerView, type Draft, type ErrorCode, type Person } from './api';
   import { formatAddresses, parseAddresses } from './addresses';
-  import { strings } from './strings';
+  import { fileSize, strings } from './strings';
 
   interface Props {
     view: ComposerView;
-    // The server's words when the last attempt to send this message was refused.
-    rejected?: string;
+    // Why the last attempt to send this message failed.
+    problem?: string;
     onSent: (id: string) => void;
     onClose: () => void;
     onError: (error: ErrorCode) => void;
   }
-  const { view, rejected, onSent, onClose, onError }: Props = $props();
+  const { view, problem: sendProblem, onSent, onClose, onError }: Props = $props();
 
   // The fields the person edits. Addresses are text until sent or saved.
   // svelte-ignore state_referenced_locally
@@ -36,22 +36,24 @@
   let busy = $state(false);
 
   function current(): Draft | null {
-    const lists = [to, cc, bcc].map(parseAddresses);
-    for (const l of lists) {
+    const people: Person[][] = [];
+    for (const field of [to, cc, bcc]) {
+      const l = parseAddresses(field);
       if (!l.ok) {
         problem = strings.compose.badAddress(l.bad);
         return null;
       }
+      people.push(l.people);
     }
     problem = '';
-    const [t, c, b] = lists.map((l) => (l.ok ? l.people : []));
+    const [t = [], c = [], b = []] = people;
     return {
       ...start,
       uid,
       messageId,
-      to: t!,
-      cc: c!,
-      bcc: b!,
+      to: t,
+      cc: c,
+      bcc: b,
       subject,
       text,
       attachments,
@@ -68,15 +70,17 @@
     dirty = true;
     saved = false;
     clearTimeout(timer);
-    timer = setTimeout(() => void persist(), 2000);
+    // While sending, a save would race the send's own; a failed send saves what changed.
+    if (!busy) timer = setTimeout(() => void persist(), 2000);
   }
 
-  function persist(): Promise<void> {
+  // Saves what changed, if anything, and reports whether the draft on the server is now current.
+  function persist(): Promise<boolean> {
     clearTimeout(timer);
-    running = running.then(async () => {
-      if (!dirty) return;
+    const result = running.then(async () => {
+      if (!dirty) return true;
       const draft = current();
-      if (!draft) return;
+      if (!draft) return false;
       dirty = false;
       saving = true;
       const result = await saveDraft(draft);
@@ -84,20 +88,45 @@
       if (!result.ok) {
         dirty = true;
         onError(result.error);
-        return;
+        return false;
       }
       uid = result.value.uid;
       messageId = result.value.messageId;
+      // The attachments now live in the new copy; the one they pointed into is gone. Any added
+      // or removed meanwhile keep their place.
+      const now = result.value.attachments;
+      attachments = attachments.map((a) => {
+        const i = draft.attachments.indexOf(a);
+        return i >= 0 ? (now[i] ?? a) : a;
+      });
       saved = true;
+      return true;
     });
-    return running;
+    running = result.then(() => undefined);
+    return result;
   }
 
-  $effect(() => () => clearTimeout(timer));
+  // Leaving the page with unsaved changes asks first; closing the composer some other way (a new
+  // one opening in its place) saves them.
+  $effect(() => {
+    const warn = (event: BeforeUnloadEvent) => {
+      if (dirty) event.preventDefault();
+    };
+    addEventListener('beforeunload', warn);
+    return () => {
+      removeEventListener('beforeunload', warn);
+      clearTimeout(timer);
+      if (dirty && !busy) void persist();
+    };
+  });
 
+  // Closes once the draft is safe in Drafts; otherwise the composer stays open, saying why.
   async function close(): Promise<void> {
-    await persist();
-    onClose();
+    if (await persist()) {
+      onClose();
+      return;
+    }
+    if (!problem) problem = strings.compose.unsaved;
   }
 
   async function discard(): Promise<void> {
@@ -110,29 +139,27 @@
 
   async function submit(event: SubmitEvent): Promise<void> {
     event.preventDefault();
+    clearTimeout(timer);
+    busy = true;
+    // A save in flight changes where the draft is; send from there.
+    await running;
     const draft = current();
-    if (!draft) return;
-    if (draft.to.length + draft.cc.length + draft.bcc.length === 0) {
-      problem = strings.compose.noRecipients;
+    if (!draft || draft.to.length + draft.cc.length + draft.bcc.length === 0) {
+      if (draft) problem = strings.compose.noRecipients;
+      busy = false;
       return;
     }
-    clearTimeout(timer);
     dirty = false;
-    await running;
-    busy = true;
     const result = await send(draft);
     busy = false;
     if (!result.ok) {
+      changed();
       onError(result.error);
       return;
     }
+    // Sent: anything typed since is not saved over the draft the outbox is about to send.
+    dirty = false;
     onSent(result.value.id);
-  }
-
-  function size(bytes: number): string {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
-    return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
   }
 </script>
 
@@ -144,8 +171,8 @@
   </header>
 
   <form onsubmit={submit} oninput={changed}>
-    {#if rejected}
-      <p class="error-banner" role="alert">{strings.compose.rejected} {rejected}</p>
+    {#if sendProblem}
+      <p class="error-banner" role="alert">{sendProblem}</p>
     {/if}
     <div class="field">
       <span class="label">{strings.compose.from}</span>
@@ -179,7 +206,7 @@
         {#each attachments as a, i (a.part ?? a.name + i)}
           <li>
             <span>{a.name}</span>
-            <span class="size">{size(a.size)}</span>
+            <span class="size">{fileSize(a.size)}</span>
             <button
               type="button"
               class="icon"

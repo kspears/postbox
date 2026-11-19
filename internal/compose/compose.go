@@ -5,12 +5,12 @@ package compose
 import (
 	"bytes"
 	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"html"
 	"io"
 	"mime"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -58,6 +58,11 @@ type Draft struct {
 	Attachments []Attachment `json:"attachments"`
 }
 
+// NewDraft is an empty draft from me, with every list empty rather than nil.
+func NewDraft(me Person) *Draft {
+	return &Draft{From: me, To: []Person{}, Cc: []Person{}, Bcc: []Person{}, Attachments: []Attachment{}}
+}
+
 // Recipients is everyone the message goes to, Bcc included, each address once.
 func (d *Draft) Recipients() []string {
 	var out []string
@@ -76,19 +81,17 @@ func (d *Draft) Recipients() []string {
 
 // NewMessageID returns a fresh Message-ID (without angle brackets) under the sender's domain.
 func NewMessageID(from string) string {
-	b := make([]byte, 16)
-	rand.Read(b)
 	domain := "postbox.invalid"
 	if _, d, ok := strings.Cut(from, "@"); ok && d != "" {
 		domain = d
 	}
-	return hex.EncodeToString(b) + "@" + domain
+	return strings.ToLower(rand.Text()) + "@" + domain
 }
 
-// Build writes d as a message. With bcc the Bcc header is kept, as it is in Drafts and Sent;
-// without it the header is left out, as it is for the copy the recipients get. data supplies
-// the content of attachments that refer to parts on the server.
-func Build(d *Draft, date time.Time, bcc bool, data func(Attachment) ([]byte, error)) ([]byte, error) {
+// Build writes d as a message, Bcc header included, as it is kept in Drafts and Sent (the
+// outbox removes it from the recipients' copy). data supplies the content of attachments that
+// refer to parts on the server.
+func Build(d *Draft, date time.Time, data func(Attachment) ([]byte, error)) ([]byte, error) {
 	var h gomail.Header
 	h.SetDate(date)
 	h.SetAddressList("From", []*gomail.Address{d.From.address()})
@@ -104,9 +107,7 @@ func Build(d *Draft, date time.Time, bcc bool, data func(Attachment) ([]byte, er
 	}
 	set("To", d.To)
 	set("Cc", d.Cc)
-	if bcc {
-		set("Bcc", d.Bcc)
-	}
+	set("Bcc", d.Bcc)
 	h.SetSubject(d.Subject)
 	if d.MessageID == "" {
 		d.MessageID = NewMessageID(d.From.Email)
@@ -151,6 +152,8 @@ func Build(d *Draft, date time.Time, bcc bool, data func(Attachment) ([]byte, er
 	}
 
 	for _, a := range d.Attachments {
+		// Header values come from other people's mail; a line break would end the header early.
+		a.Name, a.Type, a.ContentID = oneLine(a.Name), oneLine(a.Type), oneLine(a.ContentID)
 		content := a.Data
 		if content == nil {
 			if content, err = data(a); err != nil {
@@ -180,6 +183,24 @@ func Build(d *Draft, date time.Time, bcc bool, data func(Attachment) ([]byte, er
 	}
 	return buf.Bytes(), nil
 }
+
+// Saved is where d's attachments are once Build's message is stored at folder/uid: Build writes
+// the text and HTML as part 1 and the attachments after it, in order, as parts 2, 3 and on.
+func Saved(d *Draft, folder string, uid uint32) []Attachment {
+	out := make([]Attachment, len(d.Attachments))
+	for i, a := range d.Attachments {
+		if a.Data != nil {
+			a.Size = int64(len(a.Data))
+		}
+		a.Folder, a.UID, a.Part, a.Data = folder, uid, strconv.Itoa(i+2), nil
+		out[i] = a
+	}
+	return out
+}
+
+var lineBreaks = strings.NewReplacer("\r\n", " ", "\r", " ", "\n", " ")
+
+func oneLine(s string) string { return lineBreaks.Replace(s) }
 
 func writeInline(w *gomail.InlineWriter, mediaType, content string) error {
 	var h gomail.InlineHeader

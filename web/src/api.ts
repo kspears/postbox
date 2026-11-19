@@ -10,6 +10,7 @@ const knownErrors = [
   'not_found',
   'folder_exists',
   'too_late',
+  'sending',
   'internal',
 ] as const;
 export type ErrorCode = (typeof knownErrors)[number];
@@ -244,7 +245,8 @@ export function composer(mode: ComposeMode, folder?: string, uid?: number): Prom
   return call('GET', `/api/compose?${query}`);
 }
 
-export function saveDraft(draft: Draft): Promise<Result<{ folder: string; uid: number; messageId: string }>> {
+/** Saves the draft; its attachments are then in the new copy, where the answer says. */
+export function saveDraft(draft: Draft): Promise<Result<{ uid: number; messageId: string; attachments: DraftAttachment[] }>> {
   return call('POST', '/api/drafts', draft);
 }
 
@@ -252,7 +254,7 @@ export function discardDraft(uid: number): Promise<Result<void>> {
   return call('POST', '/api/drafts/discard', { uid });
 }
 
-export function send(draft: Draft): Promise<Result<{ id: string; folder: string; uid: number }>> {
+export function send(draft: Draft): Promise<Result<{ id: string }>> {
   return call('POST', '/api/send', draft);
 }
 
@@ -267,8 +269,12 @@ export interface SendStatus {
   draftsFolder: string;
   draftUid: number;
   state: SendState;
+  // Why a send failed, and the server's own words when it refused the message.
+  reason?: SendFailure;
   error?: string;
 }
+
+export type SendFailure = 'rejected' | 'refused' | 'unreachable' | 'unreadable' | 'invalid';
 
 export function sendStatus(id: string): Promise<Result<SendStatus>> {
   return call('GET', `/api/send?${new URLSearchParams({ id })}`);
