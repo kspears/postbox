@@ -1,5 +1,6 @@
 -- A passkey that signs an account in. The account password is sealed under a key derived from
--- the passkey's PRF output, which only the passkey can produce; nothing here opens it.
+-- the passkey's PRF output, which only the passkey can produce, or (009) from
+-- POSTBOX_PASSKEY_KEY; nothing in this database opens it.
 CREATE TABLE passkeys (
     id          BLOB PRIMARY KEY,  -- the credential id
     account     TEXT NOT NULL,     -- lower-case email address

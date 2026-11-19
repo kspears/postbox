@@ -583,6 +583,8 @@ performance panel, median of five tries.
 | Second factor | "Require passkey" switch; no authenticator codes | Less to build than codes; guards Postbox only, stated in the UI | agent default |
 | Passkeys without PRF | Accepted when `POSTBOX_PASSKEY_KEY` is set, with the password encrypted under a key derived from it; refused otherwise | 1Password and Bitwarden must work as passkey providers. The database alone still reveals nothing; the database and the server's configuration together reveal those passwords | user |
 | Enrolment with a provider that reports no PRF support | Saved straight away under the server key, with no second prompt | Asking again cannot produce a key such a provider lacks | agent default |
+| Removing a passkey, or `postbox passkeys clear` | Also ends the account's passkey sessions, other than the one that asked | A passkey is removed because it was lost; its sessions should not outlive it. Sessions do not record which passkey started them, so all passkey sessions go | agent default |
+| Failed sign-ins with a passkey Postbox does not know | Count against that passkey and the client IP's limit, not an account | One removed passkey retried must not block every passkey sign-in from the address | agent default |
 | Lost passkey | Remove after password sign-in; operator CLI clears when "Require passkey" is on | Simple recovery path | agent default |
 | Password change | Ends password sessions; a passkey asks for the new password once and is kept | No lockout when "Require passkey" is on | user |
 | Accounts | One account per login, several identities | Unified inbox deferred | user |

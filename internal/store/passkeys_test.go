@@ -29,7 +29,10 @@ func TestPasskeys(t *testing.T) {
 	if err != nil || len(list) != 2 || string(list[0].ID) != "one" {
 		t.Fatalf("list: %+v, %v", list, err)
 	}
-	if err := s.UpdatePasskey(ctx, []byte("one"), []byte(`{"n":1}`), []byte("new")); err != nil {
+	if err := s.UpdatePasskeyCredential(ctx, []byte("one"), []byte(`{"n":1}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpdatePasskeySealed(ctx, []byte("one"), []byte("new")); err != nil {
 		t.Fatal(err)
 	}
 	if p, err := s.PasskeyByID(ctx, []byte("one")); err != nil || string(p.Sealed) != "new" || string(p.Credential) != `{"n":1}` || p.Lock != LockPRF {
@@ -55,13 +58,22 @@ func TestPasskeys(t *testing.T) {
 	}
 
 	// Removing a passkey keeps the switch on; removing the last turns it off.
-	if on, err := s.RemovePasskey(ctx, account, []byte("one")); err != nil || !on {
+	// Removing a passkey ends the other passkey sessions.
+	if err := s.CreateSession(ctx, Session{ID: "key2", Account: account, Sealed: []byte("x"), Method: MethodPasskey, CreatedAt: now, ExpiresAt: now.Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if on, err := s.RemovePasskey(ctx, account, []byte("one"), "key"); err != nil || !on {
 		t.Errorf("remove one: %v, %v", on, err)
 	}
-	if _, err := s.RemovePasskey(ctx, "b@example.test", []byte("two")); !errors.Is(err, ErrNotFound) {
+	for id, want := range map[string]bool{"key": true, "key2": false, "mine": true} {
+		if _, err := s.Session(ctx, id); (err == nil) != want {
+			t.Errorf("after removal, session %s kept = %v, want %v", id, err == nil, want)
+		}
+	}
+	if _, err := s.RemovePasskey(ctx, "b@example.test", []byte("two"), ""); !errors.Is(err, ErrNotFound) {
 		t.Errorf("another account's passkey: %v", err)
 	}
-	if on, err := s.RemovePasskey(ctx, account, []byte("two")); err != nil || on {
+	if on, err := s.RemovePasskey(ctx, account, []byte("two"), ""); err != nil || on {
 		t.Errorf("remove last: %v, %v", on, err)
 	}
 

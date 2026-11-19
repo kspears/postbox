@@ -233,8 +233,11 @@ export async function setMailPassword(account: string, password: string): Promis
   // Dovecot looks at the file at most once a second; a login just after the change may still
   // see the old password. Wait until it takes the new one. Each refusal slows dovecot's answers
   // to this address, so the first try waits out the second.
-  for (let wait = 1100; ; wait = 500) {
-    await new Promise((resolve) => setTimeout(resolve, wait));
-    if (/^t0 OK/m.test(await imap(account, [], password))) return;
-  }
+  await expect.poll(() => imap(account, [], password), { intervals: [1100, 500], timeout: 15_000 }).toMatch(/^t0 OK/m);
+}
+
+export async function signOut(page: Page): Promise<void> {
+  await page.getByRole('button', { name: /^Account:/ }).click();
+  await page.getByRole('menuitem', { name: 'Sign out', exact: true }).click();
+  await expectSignInScreen(page);
 }

@@ -28,8 +28,7 @@ func (a *apiHandler) preferences(r *http.Request, account string) (preferences, 
 	return p, err
 }
 
-// settings answers GET /api/settings: the preferences, the identities, the passkeys and
-// whether one is required.
+// settings answers GET /api/settings: the preferences and the identities.
 func (a *apiHandler) settings(w http.ResponseWriter, r *http.Request, s *session.Session) {
 	p, err := a.preferences(r, s.Account)
 	if err != nil {
@@ -41,23 +40,7 @@ func (a *apiHandler) settings(w http.ResponseWriter, r *http.Request, s *session
 		internalError(w, r, err)
 		return
 	}
-	keys, err := a.Store.Passkeys(r.Context(), s.Account)
-	if err != nil {
-		internalError(w, r, err)
-		return
-	}
-	required, err := a.Store.PasskeyRequired(r.Context(), s.Account)
-	if err != nil {
-		internalError(w, r, err)
-		return
-	}
-	passkeys := make([]passkeyView, len(keys))
-	for i, k := range keys {
-		passkeys[i] = viewPasskey(k)
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"preferences": p, "identities": ids, "passkeys": passkeys, "requirePasskey": required,
-	})
+	writeJSON(w, http.StatusOK, map[string]any{"preferences": p, "identities": ids})
 }
 
 // updatePreferences answers PUT /api/preferences with the whole set of preferences.

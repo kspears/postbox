@@ -8,14 +8,15 @@
     saveIdentity,
     savePasskey,
     savePreferences,
+    passkeys as fetchPasskeys,
     setRequirePasskey,
-    settings,
     unlockNewPasskey,
     type Identity,
     type NewPasskey,
     type Passkey,
     type Preferences,
   } from './api';
+  import { mediumDate } from './listFormat';
   import type RichEditor from './RichEditor.svelte';
   import { strings } from './strings';
 
@@ -83,15 +84,14 @@
   let passkeys = $state<Passkey[]>([]);
   let required = $state(false);
   $effect(() => {
-    void settings().then((result) => {
+    void fetchPasskeys().then((result) => {
       if (!result.ok) return;
       passkeys = result.value.passkeys;
       required = result.value.requirePasskey;
     });
   });
 
-  const added = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' });
-  const addedOn = (p: Passkey): string => added.format(new Date(p.added));
+  const addedOn = (p: Passkey): string => mediumDate(p.added);
 
   // A passkey created whose PRF output still has to be asked for, in a second prompt.
   let unfinished = $state<NewPasskey | null>(null);
@@ -102,7 +102,11 @@
     passkeyProblem = '';
     working = true;
     try {
-      const created = await createPasskey();
+      const created = await createPasskey().catch(() => null);
+      if (created === null) {
+        passkeyProblem = strings.settings.passkeyFailed;
+        return;
+      }
       if (created === cancelled) return;
       if (!created.ok) {
         passkeyProblem = strings.settings.passkeyFailed;
@@ -120,9 +124,14 @@
     if (!unfinished) return;
     working = true;
     try {
-      const used = await unlockNewPasskey(unfinished);
+      const used = await unlockNewPasskey(unfinished).catch(() => null);
       if (used === cancelled) return;
       unfinished = null;
+      // A provider that says it has PRF must give the key: never let it fall back to the server's.
+      if (used === null || !used.prf) {
+        passkeyProblem = used === null ? strings.settings.passkeyFailed : strings.settings.passkeyUnsupported;
+        return;
+      }
       await keep(used);
     } finally {
       working = false;

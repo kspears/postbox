@@ -13,19 +13,44 @@ import (
 func TestCeremonies(t *testing.T) {
 	var c ceremonies
 	now := time.Unix(1_800_000_000, 0)
-	nonce := c.put(now, ceremony{account: "a"})
-	if _, err := c.take(now.Add(ceremonyLife), nonce, true); !errors.Is(err, ErrExpired) {
+	put := func(cer ceremony) string {
+		t.Helper()
+		nonce, err := c.put(now, cer)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return nonce
+	}
+	nonce := put(ceremony{kind: signIn})
+	if _, err := c.take(now.Add(ceremonyLife), nonce, signIn); !errors.Is(err, ErrExpired) {
 		t.Errorf("after its life: %v", err)
 	}
-	nonce = c.put(now, ceremony{account: "a"})
-	if cer, err := c.take(now, nonce, true); err != nil || cer.account != "a" {
-		t.Fatalf("kept take: %+v, %v", cer, err)
+	nonce = put(ceremony{kind: newPassword, account: "a"})
+	if cer, err := c.get(now, nonce, newPassword); err != nil || cer.account != "a" {
+		t.Fatalf("get: %+v, %v", cer, err)
 	}
-	if _, err := c.take(now, nonce, false); err != nil {
-		t.Fatalf("second take: %v", err)
+	// A nonce finishes only its own kind of ceremony.
+	for _, kind := range []ceremonyKind{enrolment, signIn} {
+		if _, err := c.take(now, nonce, kind); !errors.Is(err, ErrExpired) {
+			t.Errorf("as kind %d: %v", kind, err)
+		}
 	}
-	if _, err := c.take(now, nonce, false); !errors.Is(err, ErrExpired) {
+	if _, err := c.take(now, nonce, newPassword); err != nil {
+		t.Fatalf("take: %v", err)
+	}
+	if _, err := c.take(now, nonce, newPassword); !errors.Is(err, ErrExpired) {
 		t.Errorf("used nonce: %v", err)
+	}
+
+	// Full of live ceremonies, the next is refused; once they expire, there is room again.
+	for range maxCeremonies - len(c.byID) {
+		put(ceremony{kind: signIn})
+	}
+	if _, err := c.put(now, ceremony{kind: signIn}); !errors.Is(err, ErrBusy) {
+		t.Errorf("full: %v", err)
+	}
+	if _, err := c.put(now.Add(ceremonyLife), ceremony{kind: signIn}); err != nil || len(c.byID) != 1 {
+		t.Errorf("after expiry: %v, %d held", err, len(c.byID))
 	}
 }
 
@@ -72,7 +97,7 @@ func TestNewPassword(t *testing.T) {
 	if err := a.store.AddPasskey(ctx, p); err != nil {
 		t.Fatal(err)
 	}
-	nonce := a.pending.put(a.clock.Now(), ceremony{account: account, passkey: p, key: key})
+	nonce, _ := a.pending.put(a.clock.Now(), ceremony{kind: newPassword, account: account, passkeyID: id, key: key})
 
 	if _, err := a.NewPassword(ctx, client, nonce, "wrong"); !errors.Is(err, ErrWrongPassword) {
 		t.Fatalf("wrong password: %v", err)
@@ -88,8 +113,9 @@ func TestNewPassword(t *testing.T) {
 	if _, err := a.NewPassword(ctx, client, nonce, rightPassword); !errors.Is(err, ErrExpired) {
 		t.Errorf("nonce reused: %v", err)
 	}
-	// A sign-in or enrolment nonce is not a new-password one.
-	if _, err := a.NewPassword(ctx, client, a.pending.put(a.clock.Now(), ceremony{account: account}), rightPassword); !errors.Is(err, ErrExpired) {
+	// An enrolment nonce is not a new-password one.
+	enrol, _ := a.pending.put(a.clock.Now(), ceremony{kind: enrolment, account: account})
+	if _, err := a.NewPassword(ctx, client, enrol, rightPassword); !errors.Is(err, ErrExpired) {
 		t.Errorf("enrolment nonce: %v", err)
 	}
 }
@@ -124,5 +150,46 @@ func TestEnrolOptions(t *testing.T) {
 	}
 	if _, err := a.Enrol(context.Background(), "b@example.test", "pw", nonce, nil, nil); !errors.Is(err, ErrExpired) {
 		t.Errorf("another account's nonce: %v", err)
+	}
+}
+
+func TestPasswordSignInRequiresPasskey(t *testing.T) {
+	a, _, _ := newFakeAuth(t)
+	ctx := context.Background()
+	const account = "a@example.test"
+	if err := a.store.AddPasskey(ctx, store.Passkey{ID: []byte("k"), Account: account, UserHandle: []byte("h"), Credential: []byte(`{}`), Sealed: []byte("s"), Lock: store.LockPRF, CreatedAt: a.clock.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.store.RequirePasskey(ctx, account, true, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.PasswordSignIn(ctx, client, account, "wrong"); !errors.Is(err, ErrWrongPassword) {
+		t.Errorf("wrong password: %v", err)
+	}
+	if err := a.PasswordSignIn(ctx, client, account, rightPassword); !errors.Is(err, ErrPasskeyRequired) {
+		t.Errorf("right password: %v", err)
+	}
+	// A passkey's new password is not a password sign-in.
+	if err := a.CheckPassword(ctx, client, account, rightPassword); err != nil {
+		t.Errorf("check: %v", err)
+	}
+}
+
+// Failures of passkeys Postbox does not know count against the IP's limit, not against a shared
+// account: five of them do not block a password sign-in from the same address.
+func TestUnknownPasskeysDoNotBlockTheIP(t *testing.T) {
+	a, _, _ := newFakeAuth(t)
+	ctx := context.Background()
+	for range maxPerAccountIP {
+		nonce, _, err := a.SignInOptions()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := a.SignIn(ctx, client, nonce, []byte(`{}`), nil); !errors.Is(err, ErrUnknownPasskey) {
+			t.Fatalf("garbage: %v", err)
+		}
+	}
+	if err := a.CheckPassword(ctx, client, "a@example.test", rightPassword); err != nil {
+		t.Errorf("password sign-in after unknown passkeys: %v", err)
 	}
 }

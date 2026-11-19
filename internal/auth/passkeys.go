@@ -2,10 +2,12 @@ package auth
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/hkdf"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -46,19 +48,40 @@ func (NewPasswordNeeded) Error() string { return "the stored password was refuse
 // prfSalt is the one PRF input every passkey is asked to evaluate.
 var prfSalt = []byte("postbox password key v1")
 
-// ceremonyLife bounds how long a started enrolment or sign-in, or a sign-in waiting for a new
-// password, stays usable.
-const ceremonyLife = 2 * time.Minute
+// ceremonyLife bounds how long a started enrolment or sign-in stays usable: long enough for a
+// second prompt and a security key's PIN. A sign-in waiting for a new password keeps the key
+// that opens a password in memory, so it lasts newPasswordLife.
+const (
+	ceremonyLife    = 5 * time.Minute
+	newPasswordLife = 2 * time.Minute
+)
+
+// maxCeremonies bounds the ceremonies held at once: sign-in ones can be started by anyone.
+const maxCeremonies = 10_000
+
+// ErrBusy means too many passkey ceremonies are under way; try again shortly.
+var ErrBusy = errors.New("too many passkey ceremonies")
+
+// What a ceremony is for. A nonce finishes only a ceremony of its own kind.
+type ceremonyKind int
+
+const (
+	enrolment ceremonyKind = iota + 1
+	signIn
+	newPassword
+)
 
 // ceremony is a started passkey exchange, held in memory under a random nonce.
 type ceremony struct {
+	kind    ceremonyKind
 	expires time.Time
 	data    webauthn.SessionData
 	account string
-	handle  []byte
+	// Enrolment: the account's user handle.
+	handle []byte
 	// A sign-in waiting for a new password: the passkey and the key its password is sealed with.
-	passkey store.Passkey
-	key     []byte
+	passkeyID []byte
+	key       []byte
 }
 
 type ceremonies struct {
@@ -66,35 +89,49 @@ type ceremonies struct {
 	byID map[string]ceremony
 }
 
-func (c *ceremonies) put(now time.Time, cer ceremony) string {
+func (c *ceremonies) put(now time.Time, cer ceremony) (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.byID == nil {
 		c.byID = map[string]ceremony{}
 	}
-	for id, old := range c.byID {
-		if !now.Before(old.expires) {
-			delete(c.byID, id)
+	if len(c.byID) >= maxCeremonies {
+		for id, old := range c.byID {
+			if !now.Before(old.expires) {
+				delete(c.byID, id)
+			}
+		}
+		if len(c.byID) >= maxCeremonies {
+			return "", ErrBusy
 		}
 	}
 	nonce := rand.Text()
 	cer.expires = now.Add(ceremonyLife)
+	if cer.kind == newPassword {
+		cer.expires = now.Add(newPasswordLife)
+	}
 	c.byID[nonce] = cer
-	return nonce
+	return nonce, nil
 }
 
-// take returns the ceremony for nonce; keep leaves it usable for another try.
-func (c *ceremonies) take(now time.Time, nonce string, keep bool) (ceremony, error) {
+// get returns the ceremony of kind for nonce and leaves it usable.
+func (c *ceremonies) get(now time.Time, nonce string, kind ceremonyKind) (ceremony, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	cer, ok := c.byID[nonce]
-	if !keep {
-		delete(c.byID, nonce)
-	}
-	if !ok || !now.Before(cer.expires) {
+	if !ok || cer.kind != kind || !now.Before(cer.expires) {
 		return ceremony{}, ErrExpired
 	}
 	return cer, nil
+}
+
+// take is get, and uses the ceremony up.
+func (c *ceremonies) take(now time.Time, nonce string, kind ceremonyKind) (ceremony, error) {
+	cer, err := c.get(now, nonce, kind)
+	if err == nil {
+		c.drop(nonce)
+	}
+	return cer, err
 }
 
 func (c *ceremonies) drop(nonce string) {
@@ -154,23 +191,20 @@ func (a *Authenticator) EnrolOptions(ctx context.Context, account string) (strin
 	if err != nil {
 		return "", nil, err
 	}
-	exclude := make([]protocol.CredentialDescriptor, len(u.credentials))
-	for i, c := range u.credentials {
-		exclude[i] = c.Descriptor()
-	}
 	options, data, err := a.webauthn.BeginRegistration(u,
-		webauthn.WithResidentKeyRequirement(protocol.ResidentKeyRequirementRequired),
 		webauthn.WithAuthenticatorSelection(protocol.AuthenticatorSelection{
-			ResidentKey:      protocol.ResidentKeyRequirementRequired,
-			UserVerification: protocol.VerificationRequired,
+			ResidentKey:        protocol.ResidentKeyRequirementRequired,
+			RequireResidentKey: protocol.ResidentKeyRequired(),
+			UserVerification:   protocol.VerificationRequired,
 		}),
-		webauthn.WithExclusions(exclude),
+		webauthn.WithExclusions(webauthn.Credentials(u.credentials).CredentialDescriptors()),
 		webauthn.WithExtensions(webauthn.WithExtensionPRF(protocol.PRFValues{First: prfSalt})),
 	)
 	if err != nil {
 		return "", nil, err
 	}
-	return a.pending.put(a.clock.Now(), ceremony{data: *data, account: account, handle: u.handle}), options, nil
+	nonce, err := a.pending.put(a.clock.Now(), ceremony{kind: enrolment, data: *data, account: account, handle: u.handle})
+	return nonce, options, err
 }
 
 // Enrol finishes adding a passkey: response is the browser's create() answer, and prf the
@@ -178,11 +212,8 @@ func (a *Authenticator) EnrolOptions(ctx context.Context, account string) (strin
 // and stored with the passkey. A passkey without PRF output (1Password, Bitwarden) uses
 // POSTBOX_PASSKEY_KEY instead; with neither, nothing is stored and the error is ErrNoPRF.
 func (a *Authenticator) Enrol(ctx context.Context, account, password, nonce string, response, prf []byte) (store.Passkey, error) {
-	cer, err := a.pending.take(a.clock.Now(), nonce, false)
-	if err != nil {
-		return store.Passkey{}, err
-	}
-	if cer.account != account || cer.passkey.ID != nil {
+	cer, err := a.pending.take(a.clock.Now(), nonce, enrolment)
+	if err != nil || cer.account != account {
 		return store.Passkey{}, ErrExpired
 	}
 	parsed, err := protocol.ParseCredentialCreationResponseBytes(response)
@@ -226,7 +257,8 @@ func (a *Authenticator) SignInOptions() (string, *protocol.CredentialAssertion, 
 	if err != nil {
 		return "", nil, err
 	}
-	return a.pending.put(a.clock.Now(), ceremony{data: *data}), options, nil
+	nonce, err := a.pending.put(a.clock.Now(), ceremony{kind: signIn, data: *data})
+	return nonce, options, err
 }
 
 // SignIn finishes a passkey sign-in and returns the account and its password. It counts
@@ -237,16 +269,19 @@ func (a *Authenticator) SignIn(ctx context.Context, clientIP netip.Addr, nonce s
 	unlock := a.inFlight.lock(ip)
 	defer unlock()
 
-	if err := a.checkBlocked(ctx, "", ip); err != nil {
+	cer, err := a.pending.take(a.clock.Now(), nonce, signIn)
+	if err != nil {
 		return "", "", err
-	}
-	cer, err := a.pending.take(a.clock.Now(), nonce, false)
-	if err != nil || cer.passkey.ID != nil || cer.account != "" {
-		return "", "", ErrExpired
 	}
 	parsed, err := protocol.ParseCredentialRequestResponseBytes(response)
 	if err != nil {
-		return "", "", a.failPasskey(ctx, "", ip)
+		return "", "", a.failPasskey(ctx, unknownPasskey(nil), ip)
+	}
+	// Until it verifies, a passkey's failures count against it, not an account: retrying one
+	// removed from Postbox blocks only that passkey, while the per-IP limit counts them all.
+	who := unknownPasskey(parsed.RawID)
+	if err := a.checkBlocked(ctx, who, ip); err != nil {
+		return "", "", err
 	}
 	var row store.Passkey
 	find := func(rawID, handle []byte) (webauthn.User, error) {
@@ -267,9 +302,12 @@ func (a *Authenticator) SignIn(ctx context.Context, clientIP netip.Addr, nonce s
 	credential, err := a.webauthn.ValidateDiscoverableLogin(find, cer.data, parsed)
 	if err != nil {
 		log.Printf("passkey sign-in: %v", err)
-		return "", "", a.failPasskey(ctx, row.Account, ip)
+		return "", "", a.failPasskey(ctx, cmp.Or(row.Account, who), ip)
 	}
 	account := row.Account
+	if credential.Authenticator.CloneWarning {
+		log.Printf("passkey sign-in: %s's passkey reported a lower sign count than before; it may have been copied", account)
+	}
 	if err := a.checkBlocked(ctx, account, ip); err != nil {
 		return "", "", err
 	}
@@ -281,18 +319,24 @@ func (a *Authenticator) SignIn(ctx context.Context, clientIP netip.Addr, nonce s
 	if err != nil {
 		return "", "", ErrNoPRF
 	}
-	if saved, err := json.Marshal(credential); err == nil {
-		if err := a.store.UpdatePasskey(ctx, row.ID, saved, row.Sealed); err != nil {
-			return "", "", err
-		}
-		row.Credential = saved
+	// The counters and flags the passkey reported.
+	saved, err := json.Marshal(credential)
+	if err != nil {
+		return "", "", err
+	}
+	if err := a.store.UpdatePasskeyCredential(ctx, row.ID, saved); err != nil {
+		return "", "", err
 	}
 
 	loginCtx, cancel := context.WithTimeout(ctx, loginTimeout)
 	defer cancel()
 	c, err := a.server.Login(loginCtx, clientIP, account, password)
 	if errors.Is(err, mail.ErrRefused) {
-		return "", "", NewPasswordNeeded{Nonce: a.pending.put(a.clock.Now(), ceremony{account: account, passkey: row, key: key})}
+		nonce, err := a.pending.put(a.clock.Now(), ceremony{kind: newPassword, account: account, passkeyID: row.ID, key: key})
+		if err != nil {
+			return "", "", err
+		}
+		return "", "", NewPasswordNeeded{Nonce: nonce}
 	}
 	if err != nil {
 		return "", "", err
@@ -308,23 +352,28 @@ func (a *Authenticator) SignIn(ctx context.Context, clientIP netip.Addr, nonce s
 // like a password sign-in and, when right, stored for the passkey in place of the old one.
 func (a *Authenticator) NewPassword(ctx context.Context, clientIP netip.Addr, nonce, password string) (string, error) {
 	// A wrong password may be corrected within the ceremony's life.
-	cer, err := a.pending.take(a.clock.Now(), nonce, true)
-	if err != nil || cer.passkey.ID == nil {
-		return "", ErrExpired
+	cer, err := a.pending.get(a.clock.Now(), nonce, newPassword)
+	if err != nil {
+		return "", err
 	}
 	if err := a.CheckPassword(ctx, clientIP, cer.account, password); err != nil {
 		return "", err
 	}
 	a.pending.drop(nonce)
-	sealed, err := secret.Seal(cer.key, bound(cer.passkey.ID, cer.account), password)
+	sealed, err := secret.Seal(cer.key, bound(cer.passkeyID, cer.account), password)
 	if err != nil {
 		return "", err
 	}
-	return cer.account, a.store.UpdatePasskey(ctx, cer.passkey.ID, cer.passkey.Credential, sealed)
+	return cer.account, a.store.UpdatePasskeySealed(ctx, cer.passkeyID, sealed)
 }
 
-// failPasskey records a passkey that did not verify. account is "" when the passkey named
-// none Postbox knows.
+// unknownPasskey is what a passkey's failures count against before it names an account.
+func unknownPasskey(rawID []byte) string {
+	return "passkey " + hex.EncodeToString(rawID)
+}
+
+// failPasskey records a passkey that did not verify, against its account, or against
+// unknownPasskey when it named none Postbox knows.
 func (a *Authenticator) failPasskey(ctx context.Context, account, ip string) error {
 	if err := a.fail(ctx, account, ip); !errors.Is(err, ErrWrongPassword) {
 		return err

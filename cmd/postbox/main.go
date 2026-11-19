@@ -2,6 +2,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"log"
@@ -46,15 +47,11 @@ func main() {
 	}
 }
 
-// clearPasskeys removes every passkey of the account at address and turns "Require passkey"
-// off, for a person who has lost theirs.
+// clearPasskeys removes every passkey of the account at address, ends its passkey sessions and
+// turns "Require passkey" off, for a person who has lost theirs. It needs only POSTBOX_STATE.
 func clearPasskeys(address string) error {
-	cfg, err := config.FromEnv(os.Getenv)
-	if err != nil {
-		return err
-	}
 	ctx := context.Background()
-	st, err := store.Open(ctx, cfg.State)
+	st, err := store.Open(ctx, cmp.Or(os.Getenv("POSTBOX_STATE"), config.DefaultState))
 	if err != nil {
 		return fmt.Errorf("POSTBOX_STATE: %w", err)
 	}

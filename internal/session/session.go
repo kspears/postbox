@@ -22,8 +22,8 @@ import (
 
 // How sessions are started; stored with each one.
 const (
-	Password = "password"
-	Passkey  = "passkey"
+	Password = store.MethodPassword
+	Passkey  = store.MethodPasskey
 )
 
 // Lifetimes from the spec: 30 days for passkey and "Keep me signed in" sessions; a browser

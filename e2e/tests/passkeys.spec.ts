@@ -1,14 +1,8 @@
 import { expect, test, type Page } from '@playwright/test';
-import { addAuthenticator, addPasskey, expectInbox, expectSignInScreen, fromIP, seedPassword, setMailPassword, signIn } from '../helpers';
+import { addAuthenticator, addPasskey, expectInbox, fromIP, seedPassword, setMailPassword, signIn, signOut } from '../helpers';
 
 // Milestone 9: passkeys, with Chromium's virtual authenticator as the passkey provider.
 test.use(fromIP('203.0.113.150'));
-
-async function signOut(page: Page): Promise<void> {
-  await page.getByRole('button', { name: /^Account:/ }).click();
-  await page.getByRole('menuitem', { name: 'Sign out', exact: true }).click();
-  await expectSignInScreen(page);
-}
 
 async function closeSettings(page: Page): Promise<void> {
   await page.getByRole('dialog', { name: 'Settings' }).getByRole('button', { name: 'Close' }).click();

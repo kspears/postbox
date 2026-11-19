@@ -10,6 +10,12 @@ import (
 // requirePasskey is the account_settings key of the "Require passkey" switch.
 const requirePasskey = "require_passkey"
 
+// How a session started: sessions.method.
+const (
+	MethodPassword = "password"
+	MethodPasskey  = "passkey"
+)
+
 // What a passkey's password is sealed under.
 const (
 	LockPRF    = "prf"    // a key from the passkey's PRF output
@@ -73,17 +79,22 @@ func (s *Store) passkeys(ctx context.Context, where string, arg any) ([]Passkey,
 	return out, rows.Err()
 }
 
-// UpdatePasskey stores a passkey's credential after a sign-in (its counters change), and its
-// sealed password when that was replaced.
-func (s *Store) UpdatePasskey(ctx context.Context, id, credential, sealed []byte) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE passkeys SET credential = ?, sealed = ? WHERE id = ?`,
-		string(credential), sealed, id)
+// UpdatePasskeyCredential stores a passkey's credential after a sign-in: its counters change.
+func (s *Store) UpdatePasskeyCredential(ctx context.Context, id, credential []byte) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE passkeys SET credential = ? WHERE id = ?`, string(credential), id)
 	return err
 }
 
-// RemovePasskey removes one of account's passkeys. Removing the last turns "Require passkey"
-// off. It reports whether "Require passkey" is still on.
-func (s *Store) RemovePasskey(ctx context.Context, account string, id []byte) (required bool, err error) {
+// UpdatePasskeySealed replaces the password stored for a passkey.
+func (s *Store) UpdatePasskeySealed(ctx context.Context, id, sealed []byte) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE passkeys SET sealed = ? WHERE id = ?`, sealed, id)
+	return err
+}
+
+// RemovePasskey removes one of account's passkeys, and ends the account's passkey sessions
+// other than keep (the one that asked): a passkey is removed because it was lost. Removing the
+// last turns "Require passkey" off. It reports whether "Require passkey" is still on.
+func (s *Store) RemovePasskey(ctx context.Context, account string, id []byte, keep string) (required bool, err error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return false, err
@@ -96,23 +107,34 @@ func (s *Store) RemovePasskey(ctx context.Context, account string, id []byte) (r
 	if n, _ := res.RowsAffected(); n == 0 {
 		return false, ErrNotFound
 	}
-	var left int
-	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM passkeys WHERE account = ?`, account).Scan(&left); err != nil {
+	if err := endSessions(ctx, tx, account, MethodPasskey, keep); err != nil {
+		return false, err
+	}
+	left, err := countPasskeys(ctx, tx, account)
+	if err != nil {
 		return false, err
 	}
 	if left == 0 {
 		if err := clearRequire(ctx, tx, account); err != nil {
 			return false, err
 		}
+		return false, tx.Commit()
 	}
-	if err := tx.Commit(); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) > 0 FROM account_settings WHERE account = ? AND key = ? AND value = 'true'`,
+		account, requirePasskey).Scan(&required); err != nil {
 		return false, err
 	}
-	return s.PasskeyRequired(ctx, account)
+	return required, tx.Commit()
 }
 
-// ClearPasskeys removes every passkey of account and turns "Require passkey" off. It returns
-// how many there were.
+func countPasskeys(ctx context.Context, tx *sql.Tx, account string) (int, error) {
+	var n int
+	err := tx.QueryRowContext(ctx, `SELECT count(*) FROM passkeys WHERE account = ?`, account).Scan(&n)
+	return n, err
+}
+
+// ClearPasskeys removes every passkey of account, ends its passkey sessions, and turns
+// "Require passkey" off. It returns how many passkeys there were.
 func (s *Store) ClearPasskeys(ctx context.Context, account string) (int, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -127,10 +149,19 @@ func (s *Store) ClearPasskeys(ctx context.Context, account string) (int, error) 
 	if err != nil {
 		return 0, err
 	}
+	if err := endSessions(ctx, tx, account, MethodPasskey, ""); err != nil {
+		return 0, err
+	}
 	if err := clearRequire(ctx, tx, account); err != nil {
 		return 0, err
 	}
 	return int(n), tx.Commit()
+}
+
+// endSessions ends account's sessions started by method, other than keep.
+func endSessions(ctx context.Context, tx *sql.Tx, account, method, keep string) error {
+	_, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE account = ? AND method = ? AND id != ?`, account, method, keep)
+	return err
 }
 
 func clearRequire(ctx context.Context, tx *sql.Tx, account string) error {
@@ -162,20 +193,17 @@ func (s *Store) RequirePasskey(ctx context.Context, account string, on bool, kee
 		}
 		return tx.Commit()
 	}
-	var n int
-	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM passkeys WHERE account = ?`, account).Scan(&n); err != nil {
+	n, err := countPasskeys(ctx, tx, account)
+	if err != nil {
 		return err
 	}
 	if n == 0 {
 		return ErrNoPasskey
 	}
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO account_settings (account, key, value) VALUES (?, ?, 'true')
-		 ON CONFLICT (account, key) DO UPDATE SET value = excluded.value`, account, requirePasskey); err != nil {
+	if err := setSetting(ctx, tx, account, requirePasskey, true); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM sessions WHERE account = ? AND method = 'password' AND id != ?`, account, keep); err != nil {
+	if err := endSessions(ctx, tx, account, MethodPassword, keep); err != nil {
 		return err
 	}
 	return tx.Commit()

@@ -281,15 +281,12 @@ export interface Passkey {
   added: string;
 }
 
-export interface SettingsView {
-  preferences: Preferences;
-  identities: Identity[];
-  passkeys: Passkey[];
-  requirePasskey: boolean;
+export function settings(): Promise<Result<{ preferences: Preferences; identities: Identity[] }>> {
+  return call('GET', '/api/settings');
 }
 
-export function settings(): Promise<Result<SettingsView>> {
-  return call('GET', '/api/settings');
+export function passkeys(): Promise<Result<{ passkeys: Passkey[]; requirePasskey: boolean }>> {
+  return call('GET', '/api/passkeys');
 }
 
 export function savePreferences(p: Preferences): Promise<Result<void>> {
@@ -414,17 +411,18 @@ type RequestJSON = Omit<PublicKeyCredentialRequestOptions, 'challenge' | 'allowC
 
 function credentialJSON(c: PublicKeyCredential): unknown {
   const r = c.response;
-  const response =
-    r instanceof AuthenticatorAttestationResponse
-      ? { clientDataJSON: toBase64url(r.clientDataJSON), attestationObject: toBase64url(r.attestationObject), transports: r.getTransports() }
-      : {
-          clientDataJSON: toBase64url(r.clientDataJSON),
-          authenticatorData: toBase64url((r as AuthenticatorAssertionResponse).authenticatorData),
-          signature: toBase64url((r as AuthenticatorAssertionResponse).signature),
-          userHandle: (r as AuthenticatorAssertionResponse).userHandle
-            ? toBase64url((r as AuthenticatorAssertionResponse).userHandle!)
-            : undefined,
-        };
+  let response;
+  if (r instanceof AuthenticatorAttestationResponse) {
+    response = { clientDataJSON: toBase64url(r.clientDataJSON), attestationObject: toBase64url(r.attestationObject), transports: r.getTransports() };
+  } else {
+    const a = r as AuthenticatorAssertionResponse;
+    response = {
+      clientDataJSON: toBase64url(a.clientDataJSON),
+      authenticatorData: toBase64url(a.authenticatorData),
+      signature: toBase64url(a.signature),
+      userHandle: a.userHandle ? toBase64url(a.userHandle) : undefined,
+    };
+  }
   // The PRF output goes to the server on its own, never as part of the credential.
   return { id: c.id, rawId: toBase64url(c.rawId), type: c.type, authenticatorAttachment: c.authenticatorAttachment, response, clientExtensionResults: {} };
 }

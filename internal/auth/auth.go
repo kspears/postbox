@@ -112,6 +112,23 @@ func (a *Authenticator) CheckPassword(ctx context.Context, clientIP netip.Addr, 
 	return nil
 }
 
+// PasswordSignIn is CheckPassword for the sign-in screen: an account that requires a passkey
+// is refused with ErrPasskeyRequired, but only once the password has proved right, so a guess
+// learns nothing.
+func (a *Authenticator) PasswordSignIn(ctx context.Context, clientIP netip.Addr, account, password string) error {
+	if err := a.CheckPassword(ctx, clientIP, account, password); err != nil {
+		return err
+	}
+	required, err := a.store.PasskeyRequired(ctx, account)
+	if err != nil {
+		return err
+	}
+	if required {
+		return ErrPasskeyRequired
+	}
+	return nil
+}
+
 // checkBlocked returns ErrThrottled when account may not sign in from ip now.
 func (a *Authenticator) checkBlocked(ctx context.Context, account, ip string) error {
 	blocked, err := a.store.Blocked(ctx, a.clock.Now(), account, ip)

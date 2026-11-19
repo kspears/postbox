@@ -81,6 +81,7 @@ func NewHandler(dist fs.FS, d Deps) http.Handler {
 	mux.HandleFunc("PUT /api/preferences", a.withSession(a.updatePreferences))
 	mux.HandleFunc("POST /api/identities", a.withSession(a.saveIdentity))
 	mux.HandleFunc("POST /api/identities/delete", a.withSession(a.deleteIdentity))
+	mux.HandleFunc("GET /api/passkeys", a.withSession(a.passkeys))
 	mux.HandleFunc("POST /api/passkeys/options", a.withSession(a.passkeyOptions))
 	mux.HandleFunc("POST /api/passkeys", a.withSession(a.addPasskey))
 	mux.HandleFunc("POST /api/passkeys/delete", a.withSession(a.removePasskey))

@@ -13,6 +13,11 @@ export function when(iso: string, today = new Date()): string {
   return full.format(d);
 }
 
+const medium = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' });
+
+/** A date on its own, such as when a passkey was added. */
+export const mediumDate = (iso: string): string => medium.format(new Date(iso));
+
 /** A row's date in full, for its tooltip. */
 export const longDate = (iso: string): string => long.format(new Date(iso));
 

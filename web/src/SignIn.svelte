@@ -38,13 +38,19 @@
     }
     error = result.error;
     if (error === 'wrong_credentials') password = '';
+    // The new-password step has run out: back to the start.
+    if (newPassword && error === 'passkey_failed') newPassword = null;
   }
 
   async function withPasskey(): Promise<void> {
     working = true;
     error = null;
     try {
-      const result = await passkeySignIn();
+      const result = await passkeySignIn().catch(() => null);
+      if (result === null) {
+        error = 'passkey_failed';
+        return;
+      }
       if (result === cancelled) return;
       if (!result.ok) {
         error = result.error;
@@ -69,11 +75,6 @@
 
     {#if newPassword}
       <p class="notice" role="status">{strings.signIn.newPassword}</p>
-      <label>
-        <span>{strings.signIn.password}</span>
-        <!-- svelte-ignore a11y_autofocus -->
-        <input type="password" name="password" autocomplete="current-password" required autofocus bind:value={password} />
-      </label>
     {:else}
       {#if notice === 'password_changed' && !error}
         <p class="notice" role="status">{strings.signIn.passwordChanged}</p>
@@ -84,12 +85,15 @@
         <!-- svelte-ignore a11y_autofocus -->
         <input type="email" name="email" autocomplete="username" required autofocus bind:value={email} />
       </label>
+    {/if}
 
-      <label>
-        <span>{strings.signIn.password}</span>
-        <input type="password" name="password" autocomplete="current-password" required bind:value={password} />
-      </label>
+    <label>
+      <span>{strings.signIn.password}</span>
+      <!-- svelte-ignore a11y_autofocus -->
+      <input type="password" name="password" autocomplete="current-password" required autofocus={!!newPassword} bind:value={password} />
+    </label>
 
+    {#if !newPassword}
       <label class="keep">
         <input type="checkbox" name="keep" bind:checked={keep} />
         <span>{strings.signIn.keep}</span>

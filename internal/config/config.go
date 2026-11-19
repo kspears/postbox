@@ -23,11 +23,14 @@ type Config struct {
 	PasskeyKey []byte
 }
 
+// DefaultState is the state directory when POSTBOX_STATE is unset.
+const DefaultState = "/data/postbox"
+
 // FromEnv builds a Config from getenv (os.Getenv in production). An unset variable and an
 // empty one are the same. The error names the variable at fault; main prints it after "error: ".
 func FromEnv(getenv func(string) string) (Config, error) {
 	c := Config{
-		State:          "/data/postbox",
+		State:          DefaultState,
 		Listen:         ":8080",
 		ClientIPHeader: getenv("POSTBOX_CLIENT_IP_HEADER"),
 		CAFile:         getenv("POSTBOX_CA_FILE"),

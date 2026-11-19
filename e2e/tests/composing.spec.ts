@@ -38,7 +38,6 @@ async function partText(account: string, subject: string, part: string): Promise
   return raw.replace(/=\r?\n/g, '').replace(/=([0-9A-F]{2})/g, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)));
 }
 
-
 test('criterion 21: rich text is kept in Drafts and arrives as HTML with a plain-text part', async ({ page }) => {
   await signIn(page, 'writer@example.test', seedPassword());
   await expectInbox(page);
