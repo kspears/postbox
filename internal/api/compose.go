@@ -6,6 +6,7 @@ import (
 	"net/http"
 	netmail "net/mail"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/emersion/go-imap/v2"
@@ -26,12 +27,29 @@ const (
 // What a composer opens with.
 type composerView struct {
 	Draft      *compose.Draft   `json:"draft"`
-	Identities []compose.Person `json:"identities"`
+	Identities []store.Identity `json:"identities"`
 	// SizeLimit is the largest message the submission server accepts, in bytes; 0 when unknown.
 	SizeLimit int64 `json:"sizeLimit"`
 }
 
-func me(s *session.Session) compose.Person { return compose.Person{Email: s.Account} }
+// people is identities as senders, the login address first.
+func people(ids []store.Identity) []compose.Person {
+	out := make([]compose.Person, len(ids))
+	for i, id := range ids {
+		out[i] = compose.Person{Name: id.Name, Email: id.Email}
+	}
+	return out
+}
+
+// sender is the identity d is from, or the login address when d names none of them.
+func sender(ids []store.Identity, from compose.Person) compose.Person {
+	for _, p := range people(ids) {
+		if strings.EqualFold(p.Email, from.Email) {
+			return p
+		}
+	}
+	return people(ids)[0]
+}
 
 // composer answers GET /api/compose?mode=new|reply|replyAll|forward|draft[&folder=&uid=]: the
 // content a composer opens with.
@@ -44,9 +62,14 @@ func (a *apiHandler) composer(w http.ResponseWriter, r *http.Request, s *session
 		writeError(w, http.StatusBadRequest, errBadRequest)
 		return
 	}
-	view := composerView{Identities: []compose.Person{me(s)}}
+	ids, err := a.Store.Identities(r.Context(), s.Account)
+	if err != nil {
+		internalError(w, r, err)
+		return
+	}
+	view := composerView{Identities: ids}
 	if mode == "new" {
-		view.Draft = compose.NewDraft(me(s))
+		view.Draft = compose.NewDraft(people(ids)[0])
 	} else if !a.withMail(w, r, s, func(c *mail.Conn) error {
 		if mode == "draft" && folder == "" {
 			var err error
@@ -71,7 +94,7 @@ func (a *apiHandler) composer(w http.ResponseWriter, r *http.Request, s *session
 		if mode == "draft" {
 			view.Draft, err = compose.FromDraft(raw, folder, uint32(uid))
 			if err == nil {
-				view.Draft.From = me(s)
+				view.Draft.From = sender(ids, view.Draft.From)
 			}
 			return err
 		}
@@ -79,7 +102,7 @@ func (a *apiHandler) composer(w http.ResponseWriter, r *http.Request, s *session
 		if err != nil {
 			return err
 		}
-		view.Draft = compose.Respond(original, mode, me(s))
+		view.Draft = compose.Respond(original, mode, people(ids))
 		return nil
 	}) {
 		return
@@ -91,14 +114,20 @@ func (a *apiHandler) composer(w http.ResponseWriter, r *http.Request, s *session
 var errDraftSending = errors.New("the draft is being sent")
 
 // readDraft reads a composer's content from the request and makes it the account's own: the
-// sender is the account (identities come later) and the rest is checked for size and for
-// attachments that name a real part.
-func readDraft(w http.ResponseWriter, r *http.Request, s *session.Session) (*compose.Draft, bool) {
+// sender is one of the account's identities, and the rest is checked for size and for
+// attachments that name a real part. The request may carry files the person added, base64
+// encoded, up to well past any submission server's limit.
+func (a *apiHandler) readDraft(w http.ResponseWriter, r *http.Request, s *session.Session) (*compose.Draft, bool) {
 	var d compose.Draft
-	if !decodeUpTo(w, r, &d, 64<<20) {
+	if !decodeUpTo(w, r, &d, 160<<20) {
 		return nil, false
 	}
-	d.From = me(s)
+	ids, err := a.Store.Identities(r.Context(), s.Account)
+	if err != nil {
+		internalError(w, r, err)
+		return nil, false
+	}
+	d.From = sender(ids, d.From)
 	ok := len(d.Subject) <= 1000 && len(d.To)+len(d.Cc)+len(d.Bcc) <= 500
 	for _, p := range slices.Concat(d.To, d.Cc, d.Bcc) {
 		parsed, err := netmail.ParseAddress(p.Email)
@@ -137,7 +166,7 @@ func (a *apiHandler) saveDraft(w http.ResponseWriter, r *http.Request, s *sessio
 // saveDraftHandler answers POST /api/drafts with the composer's content: it saves the draft and
 // returns where it is now.
 func (a *apiHandler) saveDraftHandler(w http.ResponseWriter, r *http.Request, s *session.Session) {
-	d, ok := readDraft(w, r, s)
+	d, ok := a.readDraft(w, r, s)
 	if !ok {
 		return
 	}
@@ -163,7 +192,7 @@ func (a *apiHandler) discardDraft(w http.ResponseWriter, r *http.Request, s *ses
 // send answers POST /api/send with the composer's content: the message is saved to Drafts and
 // enters the outbox's undo window. It returns the send's id.
 func (a *apiHandler) send(w http.ResponseWriter, r *http.Request, s *session.Session) {
-	d, ok := readDraft(w, r, s)
+	d, ok := a.readDraft(w, r, s)
 	if !ok {
 		return
 	}

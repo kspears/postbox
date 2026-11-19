@@ -20,7 +20,7 @@ test('criterion 21: a closed composer leaves a draft that reopens, and sending f
   await page.getByRole('navigation', { name: 'Folders' }).getByRole('button', { name: /^Drafts/ }).click();
   await page.getByRole('region', { name: 'Conversations' }).getByRole('listitem').filter({ hasText: subject }).getByRole('link').click();
   const reopened = page.getByRole('region', { name: subject });
-  await expect(reopened.getByLabel('Message')).toHaveValue(/Written in Postbox\./);
+  await expect(reopened.getByLabel('Message')).toContainText('Written in Postbox.');
 
   await reopened.getByRole('button', { name: 'Send' }).click();
   await expect(page.getByRole('status')).toContainText('Sending…');
@@ -39,7 +39,7 @@ test('criterion 24: Undo within the window keeps the message from going', async 
   await composer.getByRole('button', { name: 'Send' }).click();
   await page.getByRole('status').getByRole('button', { name: 'Undo' }).click();
   // The composer reopens with the message as it was.
-  await expect(page.getByRole('region', { name: subject }).getByLabel('Message')).toHaveValue('Never sent.');
+  await expect(page.getByRole('region', { name: subject }).getByLabel('Message')).toHaveText('Never sent.');
   await page.waitForTimeout(12_000);
   expect(await subjectsIn('bob@example.test', 'INBOX')).not.toContain(subject);
   expect(await subjectsIn(writer, 'Drafts')).toContain(subject);
@@ -77,7 +77,7 @@ test('a refusal while the tab is open reopens the composer with the server\'s wo
   const reopened = page.getByRole('region', { name: subject });
   await expect(reopened.getByRole('alert')).toContainText('The mail server rejected this message:', { timeout: 20_000 });
   await expect(reopened.getByRole('alert')).toContainText('Recipient address rejected');
-  await expect(reopened.getByLabel('Message')).toHaveValue('Draft stays intact.');
+  await expect(reopened.getByLabel('Message')).toHaveText('Draft stays intact.');
 });
 
 test('Reply quotes the message and addresses its sender', async ({ page }) => {
@@ -88,7 +88,7 @@ test('Reply quotes the message and addresses its sender', async ({ page }) => {
   await page.getByRole('region', { name: 'Conversations' }).getByRole('listitem').filter({ hasText: subject }).first().getByRole('link').click();
   await page.getByRole('region', { name: 'Reading pane' }).getByRole('button', { name: 'Reply', exact: true }).last().click();
   const reply = page.getByRole('region', { name: `Re: ${subject}` });
-  await expect(reply.getByLabel('Message')).toHaveValue(/> Please answer this\./);
+  await expect(reply.getByLabel('Message').locator('blockquote')).toContainText('Please answer this.');
   await expect(reply.getByLabel('To', { exact: true })).toHaveValue('Outside Sender <outside@example.org>');
 });
 
@@ -141,5 +141,5 @@ test('closing a composer whose draft cannot be saved keeps it open and says why'
   const composer = await writeMessage(page, 'bob', subject, 'Not lost.');
   await composer.getByRole('button', { name: 'Close' }).click();
   await expect(composer.getByRole('alert')).toContainText('is not an email address');
-  await expect(composer.getByLabel('Message')).toHaveValue('Not lost.');
+  await expect(composer.getByLabel('Message')).toHaveText('Not lost.');
 });

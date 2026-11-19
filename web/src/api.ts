@@ -154,7 +154,7 @@ export function allowImages(sender: string): Promise<Result<void>> {
 }
 
 export function attachmentURL(m: Message, part: string): string {
-  return `/api/attachment?${new URLSearchParams({ folder: m.folder, uid: String(m.uid), part })}`;
+  return partURL(m.folder, m.uid, part);
 }
 
 /** The body URL with remote images allowed for this one view. */
@@ -207,12 +207,18 @@ export function saveFolderOrder(order: string[]): Promise<Result<void>> {
 }
 
 export interface DraftAttachment {
+  // Where it is on the server: a part of the draft, or of the message being forwarded.
   folder?: string;
   uid?: number;
   part?: string;
   name: string;
   type: string;
   size: number;
+  // The file's content, base64, for one added here and not yet saved.
+  data?: string;
+  // An image shown in the body, which refers to it as cid:<contentId>.
+  inline?: boolean;
+  contentId?: string;
 }
 
 export interface Draft {
@@ -230,10 +236,51 @@ export interface Draft {
   attachments: DraftAttachment[];
 }
 
+export interface Identity {
+  id: number;
+  name: string;
+  email: string;
+  // Sanitised HTML; empty for none.
+  signature: string;
+}
+
+export interface Preferences {
+  appearance: 'system' | 'light' | 'dark';
+  composer: 'rich' | 'plain';
+}
+
 export interface ComposerView {
   draft: Draft;
-  identities: Person[];
+  identities: Identity[];
   sizeLimit: number;
+}
+
+export function settings(): Promise<Result<{ preferences: Preferences; identities: Identity[] }>> {
+  return call('GET', '/api/settings');
+}
+
+export function savePreferences(p: Preferences): Promise<Result<void>> {
+  return call('PUT', '/api/preferences', p);
+}
+
+/** Adds an identity (id 0) or changes one; the answer is it as stored. */
+export function saveIdentity(id: Identity): Promise<Result<Identity>> {
+  return call('POST', '/api/identities', id);
+}
+
+export function deleteIdentity(id: number): Promise<Result<void>> {
+  return call('POST', '/api/identities/delete', { id });
+}
+
+/** Addresses the person has sent mail to whose name or address starts with q. */
+export async function addresses(q: string): Promise<Result<Person[]>> {
+  const result = await call<{ addresses: Person[] }>('GET', `/api/addresses?${new URLSearchParams({ q })}`);
+  return result.ok ? { ok: true, value: result.value.addresses } : result;
+}
+
+/** The address of a part of a message on the server. */
+export function partURL(folder: string, uid: number, part: string): string {
+  return `/api/attachment?${new URLSearchParams({ folder, uid: String(uid), part })}`;
 }
 
 export type ComposeMode = 'new' | 'reply' | 'replyAll' | 'forward' | 'draft';

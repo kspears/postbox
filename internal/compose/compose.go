@@ -15,6 +15,10 @@ import (
 	"time"
 
 	gomail "github.com/emersion/go-message/mail"
+	nethtml "golang.org/x/net/html"
+	"golang.org/x/net/html/atom"
+
+	"github.com/kspears/postbox/internal/render"
 )
 
 // Person is a name and address.
@@ -127,13 +131,13 @@ func Build(d *Draft, date time.Time, data func(Attachment) ([]byte, error)) ([]b
 	if err != nil {
 		return nil, err
 	}
-	body := d.HTML
+	// A rich-text message is its HTML, with the text made from it; a plain one is its text,
+	// with the HTML made from it.
+	body, text := render.Composed(d.HTML), d.Text
 	if body == "" {
 		body = TextToHTML(d.Text)
-	}
-	text := d.Text
-	if text == "" && d.HTML != "" {
-		text = HTMLToText(d.HTML)
+	} else {
+		text = HTMLToText(body)
 	}
 
 	// Text and HTML side by side; images shown in the body travel with the HTML.
@@ -160,14 +164,7 @@ func Build(d *Draft, date time.Time, data func(Attachment) ([]byte, error)) ([]b
 				return nil, fmt.Errorf("attachment %q: %w", a.Name, err)
 			}
 		}
-		var ah gomail.AttachmentHeader
-		ah.Set("Content-Type", mediaType(a.Type))
-		ah.SetFilename(a.Name)
-		if a.Inline && a.ContentID != "" {
-			ah.Set("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": a.Name}))
-			ah.Set("Content-ID", "<"+a.ContentID+">")
-		}
-		pw, err := w.CreateAttachment(ah)
+		pw, err := createPart(w, a)
 		if err != nil {
 			return nil, err
 		}
@@ -196,6 +193,27 @@ func Saved(d *Draft, folder string, uid uint32) []Attachment {
 		out[i] = a
 	}
 	return out
+}
+
+// createPart starts a's part: an image shown in the body (inline, with its Content-ID), or a
+// file attachment. Both sit beside the text, so a's part number does not depend on which.
+func createPart(w *gomail.Writer, a Attachment) (io.WriteCloser, error) {
+	if a.Inline && a.ContentID != "" {
+		t, params, err := mime.ParseMediaType(a.Type)
+		if err != nil {
+			t, params = "application/octet-stream", map[string]string{}
+		}
+		params["name"] = a.Name
+		var h gomail.InlineHeader
+		h.Set("Content-Type", mime.FormatMediaType(t, params))
+		h.Set("Content-Transfer-Encoding", "base64")
+		h.Set("Content-ID", "<"+a.ContentID+">")
+		return w.CreateSingleInline(h)
+	}
+	var h gomail.AttachmentHeader
+	h.Set("Content-Type", mediaType(a.Type))
+	h.SetFilename(a.Name)
+	return w.CreateAttachment(h)
 }
 
 var lineBreaks = strings.NewReplacer("\r\n", " ", "\r", " ", "\n", " ")
@@ -258,24 +276,142 @@ func TextToHTML(text string) string {
 	return b.String()
 }
 
-var (
-	htmlBreak = regexp.MustCompile(`(?i)<br\s*/?>|</(p|div|li|h[1-6]|tr|blockquote)>`)
-	htmlSkip  = regexp.MustCompile(`(?is)<(style|script|head|title)\b.*?</(style|script|head|title)\s*>`)
-	htmlTag   = regexp.MustCompile(`(?s)<[^>]*>`)
-	blankRuns = regexp.MustCompile(`\n{3,}`)
-)
-
-// HTMLToText is a readable plain-text version of an HTML body.
+// HTMLToText is a readable plain-text version of an HTML body: one line per paragraph, quoted
+// passages marked "> ", list items "- " or "1. ", and a link's address after its text when the
+// two differ.
 func HTMLToText(doc string) string {
-	doc = htmlSkip.ReplaceAllString(doc, "")
-	doc = htmlBreak.ReplaceAllString(doc, "\n")
-	doc = htmlTag.ReplaceAllString(doc, "")
-	doc = html.UnescapeString(doc)
-	lines := strings.Split(doc, "\n")
+	root, err := nethtml.Parse(strings.NewReader(doc))
+	if err != nil {
+		return ""
+	}
+	var w textWriter
+	w.walk(root)
+	w.endLine()
+	lines := strings.Split(strings.Join(w.lines, "\n"), "\n")
 	for i, l := range lines {
 		lines[i] = strings.TrimRight(l, " \t")
 	}
 	return strings.TrimSpace(blankRuns.ReplaceAllString(strings.Join(lines, "\n"), "\n\n"))
+}
+
+var blankRuns = regexp.MustCompile(`\n{3,}`)
+
+// textWriter collects lines of text, each prefixed by the quote depth it was written at.
+type textWriter struct {
+	lines  []string
+	line   strings.Builder
+	quote  int
+	open   bool   // the current line has text
+	marker string // a list marker, written before the next text
+}
+
+func (w *textWriter) write(s string) {
+	if strings.TrimSpace(s) == "" && !w.open {
+		return
+	}
+	w.line.WriteString(w.marker + s)
+	w.marker = ""
+	w.open = true
+}
+
+func (w *textWriter) endLine() {
+	prefix := strings.Repeat("> ", w.quote)
+	if w.open {
+		w.lines = append(w.lines, prefix+strings.TrimSpace(w.line.String()))
+	} else if w.line.Len() == 0 && len(w.lines) > 0 && w.lines[len(w.lines)-1] != strings.TrimSpace(prefix) {
+		w.lines = append(w.lines, strings.TrimSpace(prefix))
+	}
+	w.line.Reset()
+	w.open = false
+}
+
+var spaces = regexp.MustCompile(`[ \t\r\n]+`)
+
+func (w *textWriter) walk(n *nethtml.Node) {
+	switch n.Type {
+	case nethtml.TextNode:
+		w.write(spaces.ReplaceAllString(n.Data, " "))
+		return
+	case nethtml.ElementNode:
+		switch n.DataAtom {
+		case atom.Script, atom.Style, atom.Head, atom.Title:
+			return
+		case atom.Br:
+			w.flush()
+			return
+		case atom.Blockquote:
+			w.flush()
+			w.quote++
+			w.children(n)
+			w.flush()
+			w.quote--
+			return
+		case atom.Li:
+			w.flush()
+			marker := "- "
+			if n.Parent != nil && n.Parent.DataAtom == atom.Ol {
+				marker = strconv.Itoa(1+countBefore(n)) + ". "
+			}
+			w.marker = marker
+			w.children(n)
+			w.marker = ""
+			w.flush()
+			return
+		case atom.A:
+			before := w.line.Len()
+			w.children(n)
+			label := strings.TrimSpace(w.line.String()[before:])
+			if href := attr(n, "href"); href != "" && !strings.HasPrefix(href, "mailto:") && href != label {
+				w.write(" <" + href + ">")
+			}
+			return
+		case atom.P:
+			// One paragraph is one line, as the composer makes one per press of Enter; an empty
+			// one is a blank line.
+			w.flush()
+			w.children(n)
+			w.endLine()
+			return
+		case atom.Div, atom.H1, atom.H2, atom.H3, atom.H4, atom.H5, atom.H6, atom.Pre, atom.Tr, atom.Ul, atom.Ol, atom.Hr:
+			w.flush()
+			w.children(n)
+			w.flush()
+			return
+		}
+	}
+	w.children(n)
+}
+
+// flush ends the current line if it has text.
+func (w *textWriter) flush() {
+	if w.open {
+		w.endLine()
+	}
+}
+
+func (w *textWriter) children(n *nethtml.Node) {
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		w.walk(c)
+	}
+}
+
+func countBefore(n *nethtml.Node) int {
+	count := 0
+	for s := n.PrevSibling; s != nil; s = s.PrevSibling {
+		if s.Type == nethtml.ElementNode && s.DataAtom == atom.Li {
+			count++
+		}
+	}
+	return count
+}
+
+func attr(n *nethtml.Node, key string) string {
+	for _, a := range n.Attr {
+		if a.Key == key {
+			return a.Val
+		}
+	}
+	return ""
 }
 
 // Address formats a person for reading, as in a quote header: Name <address>.

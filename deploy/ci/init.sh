@@ -28,8 +28,9 @@ cp /keys/tls/tls.crt /ca/ca.crt
 # again, and a new dev password still reaches every account. {PLAIN} keeps the file writable
 # without a hashing tool; dovecot does not cache lookups. bench (mailbench), paging (a long list),
 # changer (a password that changes mid-test) and hostile (the hostile HTML corpus) are filled
-# directly by the tests and receive no mail, so postfix does not know them.
-accounts="alice bob reader organiser writer bench paging changer hostile"
+# directly by the tests and receive no mail, so postfix does not know them; nor collector, which
+# has only a Sent folder written by seed.sh; nor signer, which only sends (identities).
+accounts="alice bob reader organiser writer bench paging changer hostile collector signer"
 if [ ! -f /auth/users ] || [ "$(cat /auth/seed 2>/dev/null)" != "$SEED_PASSWORD" ]; then
 	: >/auth/users
 	printf '%s' "$SEED_PASSWORD" >/auth/seed

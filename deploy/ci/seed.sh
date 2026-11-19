@@ -59,6 +59,7 @@ for dir in seed/*/; do
 	fi
 	want=0
 	for message in "$dir"*.eml; do
+		[ -e "$message" ] || continue # an account with only folders of mail
 		# Envelope sender is outside the stack, as for any mail arriving from elsewhere.
 		docker compose exec -T postfix sendmail -f seed@example.org "$account" <"$message"
 		want=$((want + 1))
