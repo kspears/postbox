@@ -3,10 +3,10 @@
 A web mail client in one container. Postbox talks IMAP and SMTP submission to the mail server
 you already run and keeps no copy of your mail.
 
-Status: early development. You can sign in, read, organise and write mail: plain-text
-messages, replies and forwards, drafts, and sending with a ten-second undo. Rich text,
-attachments from your computer, identities and signatures come next.
-The specification is [docs/specs/postbox.md](docs/specs/postbox.md).
+Status: feature-complete for its first release, not yet released. Postbox signs in with the
+mail password or a passkey, shows conversations with search and keyboard shortcuts, organises
+mail across folders, and writes plain or rich messages with attachments, identities and an undo
+window for sending. The specification is [docs/specs/postbox.md](docs/specs/postbox.md).
 
 ## Configuration
 
@@ -29,6 +29,68 @@ Postbox speaks plain HTTP; put a reverse proxy that terminates TLS in front of i
 must be reachable only through that proxy.
 
 `GET /healthz` returns `200` with the body `ok` while the process is up.
+
+## Deployment
+
+The image is `ghcr.io/kspears/postbox`, for linux/amd64 and linux/arm64, published from each
+version tag. It runs as an unprivileged user and keeps its state in `/data/postbox`.
+
+```yaml
+services:
+  postbox:
+    image: ghcr.io/kspears/postbox:1.0
+    restart: unless-stopped
+    environment:
+      POSTBOX_IMAP_ADDR: mail.example.com:993
+      POSTBOX_SMTP_ADDR: mail.example.com:465
+      POSTBOX_PUBLIC_URL: https://webmail.example.com
+      POSTBOX_CLIENT_IP_HEADER: X-Forwarded-For
+      POSTBOX_PASSKEY_KEY: ${POSTBOX_PASSKEY_KEY}   # optional; see below
+    volumes:
+      - postbox:/data/postbox
+    # Reachable only by the reverse proxy, which terminates TLS for POSTBOX_PUBLIC_URL.
+    expose: ["8080"]
+
+volumes:
+  postbox:
+```
+
+**The reverse proxy** must serve Postbox at the root of `POSTBOX_PUBLIC_URL` over HTTPS,
+pass the client's address in the header named by `POSTBOX_CLIENT_IP_HEADER`, and not buffer
+responses on `/api/events`, which is a stream of server-sent events.
+
+**The mail server** needs IMAP and submission over TLS with a certificate Postbox trusts (add
+`POSTBOX_CA_FILE` for a private authority), and IMAP `THREAD` and `SORT`, which Dovecot has.
+Postbox works best when the mail server:
+
+- marks the special folders (`\Archive`, `\Trash`, `\Drafts`, `\Sent`, `\Junk`); without
+  them Postbox falls back to common folder names,
+- indexes message bodies for full-text search, so body search is fast,
+- trusts the Postbox container's address to forward the person's own address, so the mail
+  server's limits and logs see people rather than Postbox: Dovecot's `login_trusted_networks`
+  for the IMAP `ID` command's `x-originating-ip`, and Postfix's `smtpd_authorized_xclient_hosts`
+  for `XCLIENT` on submission. Without this, every sign-in looks like it comes from Postbox,
+  and the mail server's own throttling counts everyone together.
+
+**State.** `postbox.db` holds settings, identities, collected addresses, passkeys and sessions,
+never mail. Losing it signs everyone out and forgets their settings and passkeys. Back up the
+volume like any other; a copy of it alone reveals no account password.
+
+**Passkeys** work in any browser for passkey providers with the WebAuthn PRF extension. To
+allow providers without it, such as 1Password and Bitwarden, set `POSTBOX_PASSKEY_KEY` to the
+output of `openssl rand -base64 32` and keep it out of the state volume and its backups: with
+both, the passwords stored for those passkeys can be read. Changing the key breaks those
+passkeys until they are added again.
+
+**A person who lost their passkey** while "Require passkey" was on is let back in by the
+operator:
+
+```sh
+docker compose exec postbox postbox passkeys clear person@example.com
+```
+
+It prints `Cleared <n> passkeys for <address>. Require passkey is off.`, ends that account's
+passkey sessions, and needs only `POSTBOX_STATE`.
 
 ## Development
 
