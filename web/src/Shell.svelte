@@ -80,12 +80,16 @@
   $effect(() => {
     fetchSettings().then((result) => {
       if (!result.ok) return;
-      preferences = result.value.preferences;
+      setPreferences(result.value.preferences);
       identities = result.value.identities;
     });
   });
 
-  $effect(() => applyAppearance(preferences.appearance));
+  // Applied only as loaded or chosen: the default would undo the appearance restored at start.
+  function setPreferences(p: Preferences): void {
+    preferences = p;
+    applyAppearance(p.appearance);
+  }
 
   // --- writing ---
   // problem: why the last attempt to send this message failed.
@@ -798,7 +802,7 @@
     account={account.account}
     {preferences}
     {identities}
-    onPreferences={(p) => (preferences = p)}
+    onPreferences={setPreferences}
     onIdentities={(list) => (identities = list)}
     onClose={() => (settingsOpen = false)}
   />

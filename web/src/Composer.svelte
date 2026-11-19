@@ -13,7 +13,7 @@
     type Preferences,
   } from './api';
   import { untrack } from 'svelte';
-  import { SvelteMap, SvelteSet } from 'svelte/reactivity';
+  import { SvelteMap } from 'svelte/reactivity';
   import { formatAddresses, parseAddresses } from './addresses';
   import RecipientInput from './RecipientInput.svelte';
   import type RichEditor from './RichEditor.svelte';
@@ -66,7 +66,6 @@
 
   // Where each inline image shows from, by Content-ID; images added here are local files.
   const images = new SvelteMap<string, string>();
-  const addedInline = new SvelteSet<string>();
   // Images already in a reopened draft are fetched before the editor shows them.
   const imagesReady = Promise.all(
     start.attachments
@@ -88,6 +87,8 @@
   const id = `composer-${crypto.randomUUID()}`;
 
   let problem = $state('');
+  // Why files the person just added were refused; kept until they add more.
+  let refused = $state('');
   let saving = $state(false);
   let saved = $state(false);
   let busy = $state(false);
@@ -106,9 +107,10 @@
     }
     problem = '';
     const [t = [], c = [], b = []] = people;
-    const html = mode === 'rich' ? (editor?.html() ?? '') : '';
-    // Images added here and since taken out of the body are not sent.
-    const kept = attachments.filter((a) => !(a.contentId && addedInline.has(a.contentId) && !html.includes(`cid:${a.contentId}`)));
+    // Until the editor has loaded, the body is still what it started as.
+    const html = mode === 'rich' ? (editor ? editor.html() : richStart) : '';
+    // Images taken out of the body are not sent.
+    const kept = attachments.filter((a) => !(mode === 'rich' && a.inline && a.contentId && !html.includes(`cid:${a.contentId}`)));
     const from = identity(fromId);
     return {
       ...start,
@@ -236,9 +238,20 @@
     } else {
       const old = plainSignature(before);
       if (old && text.includes(old)) text = text.replace(old, plainSignature(after));
-      else text = plainSignature(after) + text;
+      else text = withPlainSignature(text, plainSignature(after));
     }
     changed();
+  }
+
+  // Adds a signature below the person's own words: above a quoted original, else at the end.
+  function withPlainSignature(body: string, sig: string): string {
+    if (!sig) return body;
+    const lines = body.split('\n');
+    const quote = lines.findIndex((l) => l.startsWith('>'));
+    if (quote < 0) return `${body.trimEnd()}\n${sig}`;
+    // The line before a quote says who wrote it.
+    const at = Math.max(0, quote - 1);
+    return [lines.slice(0, at).join('\n').trimEnd(), sig, '', ...lines.slice(at)].join('\n');
   }
 
   function switchMode(): void {
@@ -275,9 +288,10 @@
    * ones are images for the body; the answer says where each accepted one shows from. */
   async function attach(files: File[], inline = false): Promise<{ contentId: string; url: string }[]> {
     const placed: { contentId: string; url: string }[] = [];
+    refused = '';
     for (const file of files) {
       if (view.sizeLimit > 0 && encodedSize() + Math.ceil((file.size * 4) / 3) > view.sizeLimit) {
-        problem = strings.compose.tooLarge(fileSize(view.sizeLimit));
+        refused = strings.compose.tooLarge(fileSize(view.sizeLimit));
         continue;
       }
       let data: string;
@@ -292,11 +306,9 @@
         a.contentId = `${crypto.randomUUID()}@postbox`;
         const url = URL.createObjectURL(file);
         images.set(a.contentId, url);
-        addedInline.add(a.contentId);
         placed.push({ contentId: a.contentId, url });
       }
       attachments = [...attachments, a];
-      problem = '';
       changed();
     }
     return placed;
@@ -422,6 +434,7 @@
     {/if}
 
     {#if problem}<p class="error-banner" role="alert">{problem}</p>{/if}
+    {#if refused}<p class="error-banner" role="alert">{refused}</p>{/if}
 
     <div class="buttons">
       <button type="submit" class="send" disabled={busy}>{strings.compose.send}</button>

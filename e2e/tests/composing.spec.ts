@@ -89,7 +89,9 @@ test('criterion 22: dropped files attach, dropped images go inline, and too-larg
   const structure = await structureOf('bob@example.test', 'INBOX', subject);
   expect(structure).toContain('"notes.txt"');
   expect(structure).toMatch(/"image" "png".*"inline"/);
-  expect(await partText('bob@example.test', subject, '1.2')).toContain('<img src="cid:');
+  // The HTML sits with its image in a related part.
+  expect(structure).toContain('"related"');
+  expect(await partText('bob@example.test', subject, '1.1.2')).toContain('<img src="cid:');
 });
 
 test('criterion 23: signatures follow the From identity, and a refused sender keeps the draft', async ({ page }) => {

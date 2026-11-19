@@ -65,10 +65,12 @@ func newPolicy() *bluemonday.Policy {
 	})
 	p.RequireParseableURLs(true)
 	p.AllowRelativeURLs(false)
-	// The text of these is never message content, so it is dropped with the element.
-	p.SkipElementsContent("script", "style", "title", "head", "noscript", "template", "textarea", "xmp", "iframe", "object", "svg", "math")
+	p.SkipElementsContent(notContent...)
 	return p
 }
+
+// The text of these is never message content, so it is dropped with the element.
+var notContent = []string{"script", "style", "title", "head", "noscript", "template", "textarea", "xmp", "iframe", "object", "svg", "math"}
 
 // A data: URL that holds a bitmap image. SVG is left out: it can carry script and references.
 var dataImage = regexp.MustCompile(`^image/(png|gif|jpeg|jpg|webp|bmp);base64,[A-Za-z0-9+/=\s]*$`)

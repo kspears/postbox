@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/emersion/go-imap/v2"
+
 	"github.com/kspears/postbox/internal/mail"
 	"github.com/kspears/postbox/internal/store"
 )
@@ -76,23 +78,18 @@ func (b *Book) seed(ctx context.Context, acct mail.Account) error {
 	if err := b.store.Setting(ctx, acct.Name, seededKey, &done); err != nil || done {
 		return err
 	}
-	var found []mail.Recipient
-	err := b.pool.Do(ctx, acct, func(c *mail.Conn) (err error) {
-		found, err = c.SentRecipients()
-		return err
+	// Its own connection, which the time limit is this long reading and not one command's.
+	var found []store.Address
+	err := b.pool.Stream(ctx, acct, func(c *mail.Conn) error {
+		return c.SentRecipients(func(a imap.Address, env *imap.Envelope) {
+			found = append(found, store.Address{Name: a.Name, Email: a.Addr(), At: env.Date})
+		})
 	})
 	if err != nil {
 		return err
 	}
-	now := time.Now()
-	for _, r := range found {
-		at := r.Date
-		if at.IsZero() {
-			at = now
-		}
-		if err := b.store.CollectAddresses(ctx, acct.Name, []store.Address{{Name: r.Name, Email: r.Email}}, at); err != nil {
-			return err
-		}
+	if err := b.store.CollectAddresses(ctx, acct.Name, found, time.Now()); err != nil {
+		return err
 	}
 	return b.store.SetSetting(ctx, acct.Name, seededKey, true)
 }

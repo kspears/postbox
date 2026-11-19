@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/kspears/postbox/internal/session"
-	"github.com/kspears/postbox/internal/store"
 )
 
 // maxAddressQuery caps the text matched against collected addresses.
@@ -22,9 +21,6 @@ func (a *apiHandler) addresses(w http.ResponseWriter, r *http.Request, s *sessio
 	if err != nil {
 		internalError(w, r, err)
 		return
-	}
-	if found == nil {
-		found = []store.Address{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"addresses": found})
 }

@@ -43,12 +43,11 @@ func people(ids []store.Identity) []compose.Person {
 
 // sender is the identity d is from, or the login address when d names none of them.
 func sender(ids []store.Identity, from compose.Person) compose.Person {
-	for _, p := range people(ids) {
-		if strings.EqualFold(p.Email, from.Email) {
-			return p
-		}
+	id := ids[0]
+	if i := slices.IndexFunc(ids, func(id store.Identity) bool { return strings.EqualFold(id.Email, from.Email) }); i >= 0 {
+		id = ids[i]
 	}
-	return people(ids)[0]
+	return compose.Person{Name: id.Name, Email: id.Email}
 }
 
 // composer answers GET /api/compose?mode=new|reply|replyAll|forward|draft[&folder=&uid=]: the

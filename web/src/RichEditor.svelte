@@ -29,6 +29,7 @@
 </script>
 
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { Editor } from '@tiptap/core';
   import StarterKit from '@tiptap/starter-kit';
   import type { EditorView } from '@tiptap/pm/view';
@@ -79,8 +80,9 @@
     return t.innerHTML;
   }
 
-  /** Replaces the signature with signature (HTML), or adds it below the first paragraph when
-   * there is none; an empty one removes it. */
+  /** Replaces the signature with signature (HTML), or adds it below the person's own words
+   * when there is none: above a quoted original and the line that introduces it, else at the
+   * end. An empty one removes it. */
   export function setSignature(signature: string): void {
     if (!editor) return;
     let range: { from: number; to: number } | undefined;
@@ -93,9 +95,17 @@
     if (range) {
       if (block) editor.chain().insertContentAt(range, block).run();
       else editor.chain().deleteRange(range).run();
-    } else if (block) {
-      editor.chain().insertContentAt(editor.state.doc.firstChild?.nodeSize ?? 0, block).run();
+      return;
     }
+    if (!block) return;
+    const doc = editor.state.doc;
+    let at = doc.content.size;
+    let previous = 0;
+    doc.forEach((node, offset) => {
+      if (node.type.name === 'blockquote' && at === doc.content.size) at = previous;
+      previous = offset;
+    });
+    editor.chain().insertContentAt(at, block).run();
   }
 
   function place(view: EditorView, files: File[], at: number): void {
@@ -110,10 +120,13 @@
     });
   }
 
+  // Made once per element: the content and images it starts from are read untracked, so adding
+  // an image does not rebuild the editor and lose what was typed.
   $effect(() => {
     if (!element) return;
-    const e = new Editor({
-      element,
+    const target = element;
+    const e = untrack(() => new Editor({
+      element: target,
       extensions: [
         StarterKit.configure({ link: { openOnClick: false, autolink: true } }),
         InlineImage.configure({ inline: false, allowBase64: false }),
@@ -139,7 +152,7 @@
       },
       onUpdate: () => onChange(),
       onTransaction: () => tick++,
-    });
+    }));
     editor = e;
     return () => e.destroy();
   });

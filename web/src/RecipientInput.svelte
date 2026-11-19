@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { addresses, type Person } from './api';
-  import { formatAddresses } from './addresses';
+  import { formatAddresses, splitList } from './addresses';
 
   interface Props {
     id: string;
@@ -16,7 +16,7 @@
   let asked = 0;
 
   function entry(): string {
-    return value.split(/[,;]/).at(-1)?.trim() ?? '';
+    return splitList(value).at(-1)?.trim() ?? '';
   }
 
   function typed(): void {
@@ -36,9 +36,8 @@
   }
 
   async function pick(p: Person): Promise<void> {
-    const cut = Math.max(value.lastIndexOf(','), value.lastIndexOf(';'));
-    const before = cut >= 0 ? `${value.slice(0, cut + 1)} ` : '';
-    value = `${before}${formatAddresses([p])}, `;
+    const earlier = splitList(value).slice(0, -1).map((e) => e.trim()).filter(Boolean);
+    value = `${[...earlier, formatAddresses([p])].join(', ')}, `;
     offers = [];
     // The form saves the draft on input; picking is input too. Once the field shows the new
     // value, or the binding would read the old one back.

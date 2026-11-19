@@ -53,9 +53,13 @@ func (s *Store) identities(ctx context.Context, account string) ([]Identity, err
 }
 
 // SaveIdentity adds id (ID 0) or changes one of account's identities, and returns it as stored.
-// The login identity keeps its address.
+// The login identity keeps its address, and no other identity takes it.
 func (s *Store) SaveIdentity(ctx context.Context, account string, id Identity) (Identity, error) {
+	login := strings.EqualFold(id.Email, account)
 	if id.ID == 0 {
+		if login {
+			return Identity{}, ErrLoginIdentity
+		}
 		res, err := s.db.ExecContext(ctx,
 			`INSERT INTO identities (account, name, email, signature, position)
 			 VALUES (?, ?, ?, ?, (SELECT coalesce(max(position), 0) + 1 FROM identities WHERE account = ?))`,
@@ -66,15 +70,11 @@ func (s *Store) SaveIdentity(ctx context.Context, account string, id Identity) (
 		id.ID, err = res.LastInsertId()
 		return id, err
 	}
-	var email string
-	err := s.db.QueryRowContext(ctx, `SELECT email FROM identities WHERE account = ? AND id = ?`, account, id.ID).Scan(&email)
-	if errors.Is(err, sql.ErrNoRows) {
-		return Identity{}, ErrNotFound
-	}
+	wasLogin, err := s.isLogin(ctx, account, id.ID)
 	if err != nil {
 		return Identity{}, err
 	}
-	if strings.EqualFold(email, account) && !strings.EqualFold(id.Email, account) {
+	if wasLogin != login {
 		return Identity{}, ErrLoginIdentity
 	}
 	_, err = s.db.ExecContext(ctx, `UPDATE identities SET name = ?, email = ?, signature = ? WHERE account = ? AND id = ?`,
@@ -84,17 +84,23 @@ func (s *Store) SaveIdentity(ctx context.Context, account string, id Identity) (
 
 // DeleteIdentity removes one of account's identities other than the login address.
 func (s *Store) DeleteIdentity(ctx context.Context, account string, id int64) error {
-	var email string
-	err := s.db.QueryRowContext(ctx, `SELECT email FROM identities WHERE account = ? AND id = ?`, account, id).Scan(&email)
-	if errors.Is(err, sql.ErrNoRows) {
-		return ErrNotFound
-	}
+	login, err := s.isLogin(ctx, account, id)
 	if err != nil {
 		return err
 	}
-	if strings.EqualFold(email, account) {
+	if login {
 		return ErrLoginIdentity
 	}
 	_, err = s.db.ExecContext(ctx, `DELETE FROM identities WHERE account = ? AND id = ?`, account, id)
 	return err
+}
+
+// isLogin reports whether identity id of account is the login address, or ErrNotFound.
+func (s *Store) isLogin(ctx context.Context, account string, id int64) (bool, error) {
+	var email string
+	err := s.db.QueryRowContext(ctx, `SELECT email FROM identities WHERE account = ? AND id = ?`, account, id).Scan(&email)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, ErrNotFound
+	}
+	return strings.EqualFold(email, account), err
 }

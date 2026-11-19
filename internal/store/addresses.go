@@ -1,6 +1,7 @@
 package store
 
 import (
+	"cmp"
 	"context"
 	"net/mail"
 	"strings"
@@ -11,9 +12,12 @@ import (
 type Address struct {
 	Name  string `json:"name"`
 	Email string `json:"email"`
+	// At is when mail was sent to the address, for CollectAddresses; zero means its at.
+	At time.Time `json:"-"`
 }
 
-// CollectAddresses remembers people as addresses account has sent mail to, as of at. An address
+// CollectAddresses remembers people as addresses account has sent mail to, each as of its At or
+// else at, in one transaction. An address
 // seen again counts one more use, keeps the later time and takes the new name when it has one
 // and is not older than the name already kept. Entries without a valid address are skipped.
 func (s *Store) CollectAddresses(ctx context.Context, account string, people []Address, at time.Time) error {
@@ -33,7 +37,7 @@ func (s *Store) CollectAddresses(ctx context.Context, account string, people []A
 			   name = CASE WHEN excluded.name <> '' AND (excluded.used_at >= used_at OR name = '') THEN excluded.name ELSE name END,
 			   used_at = max(used_at, excluded.used_at),
 			   uses = uses + 1`,
-			account, email, strings.TrimSpace(p.Name), at.Unix())
+			account, email, strings.TrimSpace(p.Name), cmp.Or(p.At, at).Unix())
 		if err != nil {
 			return err
 		}

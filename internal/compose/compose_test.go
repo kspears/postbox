@@ -182,6 +182,7 @@ func TestHTMLToText(t *testing.T) {
 		`<p>On Mon, Bob wrote:</p><blockquote>Shall we?<br>Yes<blockquote>earlier</blockquote></blockquote>`: "On Mon, Bob wrote:\n> Shall we?\n> Yes\n> > earlier",
 		`<ul><li><p>one</p></li><li><p>two</p></li></ul><ol><li>a</li><li>b</li></ol>`:                       "- one\n- two\n1. a\n2. b",
 		`<p>see <a href="https://x.org">site</a>, <a href="https://y.org">https://y.org</a></p>`:             "see site <https://x.org>, https://y.org",
+		`<p>Hello there <a href="https://x.test">foo<br>b</a></p>`:                                           "Hello there foo\nb <https://x.test>",
 	} {
 		if got := HTMLToText(in); got != want {
 			t.Errorf("HTMLToText(%s)\n got  %q\n want %q", in, got, want)
@@ -201,7 +202,7 @@ func TestRichDraft(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.HTML != `<p>Hi <b>Bob</b></p><div data-signature=""><p>Alice</p></div><img src="">` {
+	if got.HTML != `<p>Hi <b>Bob</b></p><div data-signature=""><p>Alice</p></div>` {
 		t.Errorf("html %q", got.HTML)
 	}
 	if strings.TrimSpace(got.Text) != "Hi Bob\nAlice" {
@@ -242,8 +243,16 @@ func TestInlineImageIsAnInlinePart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(o.Attachments) != 2 || !o.Attachments[1].Inline || o.Attachments[1].ContentID != "dot@postbox" || o.Attachments[1].Name != "dot.png" || o.Attachments[1].Part != "3" {
+	// The image sits with the HTML in a related part; the file follows it.
+	if len(o.Attachments) != 2 || !o.Attachments[0].Inline || o.Attachments[0].ContentID != "dot@postbox" || o.Attachments[0].Name != "dot.png" || o.Attachments[0].Part != "1.2" || o.Attachments[1].Part != "2" {
 		t.Errorf("attachments %+v", o.Attachments)
+	}
+	if !bytes.Contains(raw, []byte("multipart/related")) {
+		t.Errorf("no related part:\n%s", raw)
+	}
+	saved := Saved(d, "Drafts", 1)
+	if saved[0].Part != "2" || saved[1].Part != "1.2" {
+		t.Errorf("Saved gives parts %q and %q, the message has 2 and 1.2", saved[0].Part, saved[1].Part)
 	}
 	if bytes.Contains(raw, []byte("attachment; filename=dot.png")) {
 		t.Error("the image is an attachment")

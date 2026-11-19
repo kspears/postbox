@@ -27,8 +27,9 @@ export function textToHtml(text: string): string {
 
 const blocks = new Set(['P', 'DIV', 'H1', 'H2', 'H3', 'PRE', 'UL', 'OL', 'HR']);
 
-/** The text of the rich-text editor's HTML: a line per paragraph, quotes marked "> ", list
- * items "- ". */
+/** The text of the rich-text editor's HTML, by the server's rules (compose.HTMLToText): a line
+ * per paragraph, quotes marked "> ", list items "- " or "1. ", and a link's address after its
+ * text when the two differ. */
 export function htmlToText(html: string): string {
   const doc = new DOMParser().parseFromString(html, 'text/html');
   const lines: string[] = [];
@@ -51,15 +52,21 @@ export function htmlToText(html: string): string {
         walk(child, depth + 1);
       } else if (child.tagName === 'LI') {
         if (line) end(depth);
-        line = '- ';
+        line = child.parentElement?.tagName === 'OL' ? `${Array.from(child.parentElement.children).indexOf(child) + 1}. ` : '- ';
+        const marker = line;
         walk(child, depth);
-        if (line.trim()) end(depth);
+        if (line !== marker) end(depth);
         line = '';
       } else if (blocks.has(child.tagName)) {
         // A list item's marker waits for the paragraph inside it.
-        if (line && line !== '- ') end(depth);
+        if (line && !/^(- |\d+\. )$/.test(line)) end(depth);
         walk(child, depth);
         if (child.tagName === 'P' || line) end(depth);
+      } else if (child.tagName === 'A') {
+        const before = line.length;
+        walk(child, depth);
+        const href = child.getAttribute('href') ?? '';
+        if (href && !href.startsWith('mailto:') && href !== line.slice(before).trim()) line += ` <${href}>`;
       } else {
         walk(child, depth);
       }
