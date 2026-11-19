@@ -454,6 +454,9 @@ export interface NewPasskey {
   rawId: ArrayBuffer;
   salt?: string;
   prf: string;
+  // The provider said it supports PRF. One that does not (1Password, Bitwarden) is saved
+  // without, and the server locks its password instead.
+  prfEnabled: boolean;
 }
 
 /** Asks the browser to create a passkey for this account (the first prompt of "Add a passkey"). */
@@ -472,7 +475,14 @@ export async function createPasskey(): Promise<Result<NewPasskey> | typeof cance
   if (c === cancelled) return c;
   return {
     ok: true,
-    value: { nonce: started.value.nonce, credential: credentialJSON(c), rawId: c.rawId, salt: o.extensions?.prf?.eval?.first, prf: prfOutput(c) },
+    value: {
+      nonce: started.value.nonce,
+      credential: credentialJSON(c),
+      rawId: c.rawId,
+      salt: o.extensions?.prf?.eval?.first,
+      prf: prfOutput(c),
+      prfEnabled: c.getClientExtensionResults().prf?.enabled === true,
+    },
   };
 }
 
@@ -492,7 +502,8 @@ export async function unlockNewPasskey(p: NewPasskey): Promise<NewPasskey | type
   return c === cancelled ? c : { ...p, prf: prfOutput(c) };
 }
 
-/** Stores a new passkey; it fails with passkey_unsupported when it gave no PRF output. */
+/** Stores a new passkey; it fails with passkey_unsupported when it gave no PRF output and the
+ * server has no key to stand in. */
 export function savePasskey(p: NewPasskey): Promise<Result<Passkey>> {
   return call('POST', '/api/passkeys', { nonce: p.nonce, credential: p.credential, prf: p.prf });
 }

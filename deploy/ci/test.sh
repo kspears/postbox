@@ -14,6 +14,8 @@ unset COMPOSE_FILE
 # Both seeded accounts share it. Hex only, so it needs no quoting anywhere.
 SEED_PASSWORD="ci-$(openssl rand -hex 12)"
 export SEED_PASSWORD
+POSTBOX_PASSKEY_KEY=$(openssl rand -base64 32)
+export POSTBOX_PASSKEY_KEY
 
 cleanup() {
 	status=$?

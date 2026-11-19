@@ -29,19 +29,33 @@ func TestCeremonies(t *testing.T) {
 	}
 }
 
-func TestPasswordKey(t *testing.T) {
+func TestLockKey(t *testing.T) {
+	a := &Authenticator{}
 	prf := make([]byte, 32)
-	k1, err := passwordKey(prf, []byte("one"))
+	k1, err := a.lockKey(store.LockPRF, prf, []byte("one"))
 	if err != nil || len(k1) != 32 {
 		t.Fatalf("key: %x, %v", k1, err)
 	}
-	k2, _ := passwordKey(prf, []byte("two"))
+	k2, _ := a.lockKey(store.LockPRF, prf, []byte("two"))
 	if string(k1) == string(k2) {
 		t.Error("two passkeys with one PRF output share a key")
 	}
 	sealed, _ := secret.Seal(k1, bound([]byte("one"), "a@example.test"), "pw")
 	if _, err := secret.Open(k1, bound([]byte("one"), "b@example.test"), sealed); err == nil {
 		t.Error("a sealed password opened for another account")
+	}
+	if _, err := a.lockKey(store.LockPRF, nil, []byte("one")); !errors.Is(err, ErrNoPRF) {
+		t.Errorf("no PRF output: %v", err)
+	}
+
+	// A passkey without PRF needs POSTBOX_PASSKEY_KEY, and gets a key unlike a PRF one's.
+	if _, err := a.lockKey(store.LockServer, nil, []byte("one")); !errors.Is(err, ErrNoPRF) {
+		t.Errorf("no server key: %v", err)
+	}
+	a.serverKey = prf
+	k3, err := a.lockKey(store.LockServer, nil, []byte("one"))
+	if err != nil || string(k3) == string(k1) {
+		t.Errorf("server key: %x, %v", k3, err)
 	}
 }
 
@@ -54,7 +68,7 @@ func TestNewPassword(t *testing.T) {
 	id := []byte("credential")
 	key := make([]byte, 32)
 	old, _ := secret.Seal(key, bound(id, account), "old")
-	p := store.Passkey{ID: id, Account: account, UserHandle: []byte("h"), Credential: []byte(`{}`), Sealed: old, CreatedAt: a.clock.Now()}
+	p := store.Passkey{ID: id, Account: account, UserHandle: []byte("h"), Credential: []byte(`{}`), Sealed: old, Lock: store.LockPRF, CreatedAt: a.clock.Now()}
 	if err := a.store.AddPasskey(ctx, p); err != nil {
 		t.Fatal(err)
 	}

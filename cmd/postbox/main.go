@@ -101,7 +101,7 @@ func serve() error {
 		return fmt.Errorf("POSTBOX_STATE: %w", err)
 	}
 
-	authenticator, err := auth.New(st, clk, server, cfg.PublicURL)
+	authenticator, err := auth.New(st, clk, server, cfg.PublicURL, cfg.PasskeyKey)
 	if err != nil {
 		return err
 	}

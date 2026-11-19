@@ -22,6 +22,7 @@ the variable when a required one is missing or malformed.
 | `POSTBOX_LISTEN` | no | HTTP listen address. Default `:8080`. |
 | `POSTBOX_CLIENT_IP_HEADER` | no | Request header that carries the real client IP, set by the reverse proxy. |
 | `POSTBOX_CA_FILE` | no | PEM file of extra certificate authorities trusted for the mail server. |
+| `POSTBOX_PASSKEY_KEY` | no | 32 random bytes in base64 (`openssl rand -base64 32`). Lets passkeys without the PRF extension (1Password, Bitwarden) sign in by encrypting their stored passwords with it. Keep it secret and apart from the state directory; changing it breaks those passkeys until they are added again. |
 
 Postbox speaks plain HTTP; put a reverse proxy that terminates TLS in front of it. When
 `POSTBOX_CLIENT_IP_HEADER` is set, the header is trusted from every request, so the listen port

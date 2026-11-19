@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { addAuthenticator, addPasskey, expectInbox, expectSignInScreen, fromIP, openSettings, seedPassword, setMailPassword, signIn } from '../helpers';
+import { addAuthenticator, addPasskey, expectInbox, expectSignInScreen, fromIP, seedPassword, setMailPassword, signIn } from '../helpers';
 
 // Milestone 9: passkeys, with Chromium's virtual authenticator as the passkey provider.
 test.use(fromIP('203.0.113.150'));
@@ -28,19 +28,18 @@ test('criterion 3: a passkey added in Settings signs in without a password', asy
   // deploy/ci/test.sh then searches postbox.db for the password, with this session open.
 });
 
-test('criterion 3: a passkey without PRF is refused, and nothing is listed', async ({ page }) => {
+// As 1Password and Bitwarden do: the password is locked with POSTBOX_PASSKEY_KEY instead.
+// tests/plain/passkey.spec.ts covers a Postbox without that key.
+test('a passkey without PRF signs in through the server key', async ({ page }) => {
   await addAuthenticator(page, false);
   await signIn(page, 'plainkey@example.test', seedPassword());
   await expectInbox(page);
-  const settings = await openSettings(page);
-  await settings.getByRole('button', { name: 'Add a passkey' }).click();
-  const finish = settings.getByRole('button', { name: 'Finish' });
-  const refused = settings.getByRole('alert');
-  await expect(refused.or(finish)).toBeVisible();
-  if (await finish.isVisible()) await finish.click();
-  await expect(refused).toHaveText("This passkey can't be used with Postbox. Try a different passkey provider.");
-  await expect(settings.getByRole('listitem').filter({ hasText: /^Added / })).toHaveCount(0);
-  await expect(settings.getByRole('switch', { name: 'Require passkey' })).toBeDisabled();
+  await addPasskey(page);
+  await closeSettings(page);
+  await signOut(page);
+
+  await page.getByRole('button', { name: 'Sign in with a passkey' }).click();
+  await expectInbox(page);
 });
 
 test('removing the last passkey turns "Require passkey" off', async ({ page }) => {

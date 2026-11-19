@@ -51,7 +51,7 @@ func newAuth(t *testing.T, server *mail.Server) (*Authenticator, *clock.Clock) {
 	}
 	t.Cleanup(func() { st.Close() })
 	clk := &clock.Clock{}
-	a, err := New(st, clk, server, &url.URL{Scheme: "https", Host: "mail.example.test"})
+	a, err := New(st, clk, server, &url.URL{Scheme: "https", Host: "mail.example.test"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

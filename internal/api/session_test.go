@@ -34,7 +34,7 @@ func newHandler(t *testing.T, dist fs.FS) http.Handler {
 	clk := &clock.Clock{}
 	server := &mail.Server{IMAPAddr: "127.0.0.1:1", TLS: &tls.Config{}}
 	pool := mail.NewPool(t.Context(), server, clk.Now)
-	authenticator, err := auth.New(st, clk, server, &url.URL{Scheme: "https", Host: "mail.example.test"})
+	authenticator, err := auth.New(st, clk, server, &url.URL{Scheme: "https", Host: "mail.example.test"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

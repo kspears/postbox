@@ -26,7 +26,7 @@ import (
 // Outcomes of a passkey sign-in or enrolment other than success.
 var (
 	// ErrNoPRF means the passkey gave no PRF output, or not the one its password was sealed
-	// with, so it cannot unlock a password.
+	// with, and no POSTBOX_PASSKEY_KEY stands in for it, so it cannot unlock a password.
 	ErrNoPRF = errors.New("passkey has no PRF output")
 	// ErrUnknownPasskey means the passkey is not one of an account's, or did not verify.
 	ErrUnknownPasskey = errors.New("unknown passkey")
@@ -175,7 +175,8 @@ func (a *Authenticator) EnrolOptions(ctx context.Context, account string) (strin
 
 // Enrol finishes adding a passkey: response is the browser's create() answer, and prf the
 // passkey's PRF output for prfSalt. The account password is sealed under a key derived from prf
-// and stored with the passkey. Without prf nothing is stored and the error is ErrNoPRF.
+// and stored with the passkey. A passkey without PRF output (1Password, Bitwarden) uses
+// POSTBOX_PASSKEY_KEY instead; with neither, nothing is stored and the error is ErrNoPRF.
 func (a *Authenticator) Enrol(ctx context.Context, account, password, nonce string, response, prf []byte) (store.Passkey, error) {
 	cer, err := a.pending.take(a.clock.Now(), nonce, false)
 	if err != nil {
@@ -192,10 +193,11 @@ func (a *Authenticator) Enrol(ctx context.Context, account, password, nonce stri
 	if err != nil {
 		return store.Passkey{}, fmt.Errorf("%w: %v", ErrUnknownPasskey, err)
 	}
-	if len(prf) != 32 {
-		return store.Passkey{}, ErrNoPRF
+	lock := store.LockPRF
+	if len(prf) == 0 {
+		lock = store.LockServer
 	}
-	key, err := passwordKey(prf, credential.ID)
+	key, err := a.lockKey(lock, prf, credential.ID)
 	if err != nil {
 		return store.Passkey{}, err
 	}
@@ -209,7 +211,7 @@ func (a *Authenticator) Enrol(ctx context.Context, account, password, nonce stri
 	}
 	p := store.Passkey{
 		ID: credential.ID, Account: account, UserHandle: cer.handle, Credential: saved,
-		Sealed: sealed, CreatedAt: a.clock.Now(),
+		Sealed: sealed, Lock: lock, CreatedAt: a.clock.Now(),
 	}
 	return p, a.store.AddPasskey(ctx, p)
 }
@@ -271,10 +273,7 @@ func (a *Authenticator) SignIn(ctx context.Context, clientIP netip.Addr, nonce s
 	if err := a.checkBlocked(ctx, account, ip); err != nil {
 		return "", "", err
 	}
-	if len(prf) != 32 {
-		return "", "", ErrNoPRF
-	}
-	key, err := passwordKey(prf, row.ID)
+	key, err := a.lockKey(row.Lock, prf, row.ID)
 	if err != nil {
 		return "", "", err
 	}
@@ -333,9 +332,17 @@ func (a *Authenticator) failPasskey(ctx context.Context, account, ip string) err
 	return ErrUnknownPasskey
 }
 
-// passwordKey derives the key a passkey's password is sealed with from its PRF output.
-func passwordKey(prf, credentialID []byte) ([]byte, error) {
-	return hkdf.Key(sha256.New, prf, nil, "postbox passkey password v1\x00"+string(credentialID), 32)
+// lockKey derives the key a passkey's password is sealed with: from its PRF output, or from
+// POSTBOX_PASSKEY_KEY for a passkey locked by the server. Either must be there.
+func (a *Authenticator) lockKey(lock string, prf, credentialID []byte) ([]byte, error) {
+	in := prf
+	if lock == store.LockServer {
+		in = a.serverKey
+	}
+	if len(in) != 32 {
+		return nil, ErrNoPRF
+	}
+	return hkdf.Key(sha256.New, in, nil, "postbox passkey "+lock+" v1\x00"+string(credentialID), 32)
 }
 
 // bound ties a sealed password to its passkey and account.

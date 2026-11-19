@@ -108,8 +108,9 @@
         passkeyProblem = strings.settings.passkeyFailed;
         return;
       }
-      if (created.value.prf) await keep(created.value);
-      else unfinished = created.value;
+      // A provider with PRF that gave no output yet is asked once more, in a second prompt.
+      if (created.value.prfEnabled && !created.value.prf) unfinished = created.value;
+      else await keep(created.value);
     } finally {
       working = false;
     }

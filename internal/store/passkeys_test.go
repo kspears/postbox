@@ -19,7 +19,7 @@ func TestPasskeys(t *testing.T) {
 	for i, id := range []string{"one", "two"} {
 		err := s.AddPasskey(ctx, Passkey{
 			ID: []byte(id), Account: account, UserHandle: []byte("h"), Credential: []byte(`{}`),
-			Sealed: []byte("s"), CreatedAt: now.Add(time.Duration(i) * time.Hour),
+			Sealed: []byte("s"), Lock: LockPRF, CreatedAt: now.Add(time.Duration(i) * time.Hour),
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -32,7 +32,7 @@ func TestPasskeys(t *testing.T) {
 	if err := s.UpdatePasskey(ctx, []byte("one"), []byte(`{"n":1}`), []byte("new")); err != nil {
 		t.Fatal(err)
 	}
-	if p, err := s.PasskeyByID(ctx, []byte("one")); err != nil || string(p.Sealed) != "new" || string(p.Credential) != `{"n":1}` {
+	if p, err := s.PasskeyByID(ctx, []byte("one")); err != nil || string(p.Sealed) != "new" || string(p.Credential) != `{"n":1}` || p.Lock != LockPRF {
 		t.Errorf("after update: %+v, %v", p, err)
 	}
 
@@ -65,7 +65,7 @@ func TestPasskeys(t *testing.T) {
 		t.Errorf("remove last: %v, %v", on, err)
 	}
 
-	if err := s.AddPasskey(ctx, Passkey{ID: []byte("three"), Account: account, UserHandle: []byte("h"), Credential: []byte(`{}`), Sealed: []byte("s"), CreatedAt: now}); err != nil {
+	if err := s.AddPasskey(ctx, Passkey{ID: []byte("three"), Account: account, UserHandle: []byte("h"), Credential: []byte(`{}`), Sealed: []byte("s"), Lock: LockServer, CreatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.RequirePasskey(ctx, account, true, ""); err != nil {

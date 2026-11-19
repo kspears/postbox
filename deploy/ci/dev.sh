@@ -15,6 +15,10 @@ mkdir -p .dev
 [ -s .dev/password ] || (umask 077 && printf 'dev-%s\n' "$(openssl rand -hex 8)" >.dev/password)
 SEED_PASSWORD=$(<.dev/password)
 export SEED_PASSWORD
+# The key that locks the passwords of passkeys without PRF, kept so they work after a restart.
+[ -s .dev/passkey-key ] || (umask 077 && openssl rand -base64 32 >.dev/passkey-key)
+POSTBOX_PASSKEY_KEY=$(<.dev/passkey-key)
+export POSTBOX_PASSKEY_KEY
 
 if [ $# -gt 0 ]; then
 	exec docker compose "$@"

@@ -51,15 +51,18 @@ type Authenticator struct {
 
 	webauthn *webauthn.WebAuthn
 	pending  ceremonies
+	// serverKey is POSTBOX_PASSKEY_KEY: it locks the passwords of passkeys without PRF. Nil
+	// refuses such passkeys.
+	serverKey []byte
 }
 
 // New returns an Authenticator for Postbox served at public.
-func New(st *store.Store, clk *clock.Clock, server *mail.Server, public *url.URL) (*Authenticator, error) {
+func New(st *store.Store, clk *clock.Clock, server *mail.Server, public *url.URL, serverKey []byte) (*Authenticator, error) {
 	wa, err := newWebAuthn(public)
 	if err != nil {
 		return nil, fmt.Errorf("POSTBOX_PUBLIC_URL: %w", err)
 	}
-	return &Authenticator{store: st, clock: clk, server: server, webauthn: wa}, nil
+	return &Authenticator{store: st, clock: clk, server: server, webauthn: wa, serverKey: serverKey}, nil
 }
 
 // Account turns what a person typed into the account name used everywhere else.

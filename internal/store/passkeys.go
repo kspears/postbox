@@ -10,6 +10,12 @@ import (
 // requirePasskey is the account_settings key of the "Require passkey" switch.
 const requirePasskey = "require_passkey"
 
+// What a passkey's password is sealed under.
+const (
+	LockPRF    = "prf"    // a key from the passkey's PRF output
+	LockServer = "server" // a key from POSTBOX_PASSKEY_KEY, for a passkey without PRF
+)
+
 // Passkey is a row of the passkeys table.
 type Passkey struct {
 	ID         []byte
@@ -17,14 +23,15 @@ type Passkey struct {
 	UserHandle []byte
 	Credential []byte
 	Sealed     []byte
+	Lock       string
 	CreatedAt  time.Time
 }
 
 // AddPasskey stores a new passkey.
 func (s *Store) AddPasskey(ctx context.Context, p Passkey) error {
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO passkeys (id, account, user_handle, credential, sealed, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		p.ID, p.Account, p.UserHandle, string(p.Credential), p.Sealed, p.CreatedAt.Unix())
+		`INSERT INTO passkeys (id, account, user_handle, credential, sealed, lock, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		p.ID, p.Account, p.UserHandle, string(p.Credential), p.Sealed, p.Lock, p.CreatedAt.Unix())
 	return err
 }
 
@@ -47,7 +54,7 @@ func (s *Store) Passkeys(ctx context.Context, account string) ([]Passkey, error)
 
 func (s *Store) passkeys(ctx context.Context, where string, arg any) ([]Passkey, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, account, user_handle, credential, sealed, created_at FROM passkeys `+where, arg)
+		`SELECT id, account, user_handle, credential, sealed, lock, created_at FROM passkeys `+where, arg)
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +64,7 @@ func (s *Store) passkeys(ctx context.Context, where string, arg any) ([]Passkey,
 		var p Passkey
 		var credential string
 		var created int64
-		if err := rows.Scan(&p.ID, &p.Account, &p.UserHandle, &credential, &p.Sealed, &created); err != nil {
+		if err := rows.Scan(&p.ID, &p.Account, &p.UserHandle, &credential, &p.Sealed, &p.Lock, &created); err != nil {
 			return nil, err
 		}
 		p.Credential, p.CreatedAt = []byte(credential), time.Unix(created, 0)
