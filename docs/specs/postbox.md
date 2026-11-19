@@ -589,6 +589,8 @@ performance panel, median of five tries.
 | Special folders when the server marks none | Fall back to common names; create when missing | Works on servers that omit special-use | agent default |
 | Drag and drop | Messages to folders, files to composer, images inline, folders to nest and reorder | The user's main complaint about existing clients | user |
 | Folder order | Stored in Postbox; not visible to other clients | IMAP has no folder order | agent default |
+| Folder names typed in Postbox | No `/`, `.`, `\`, `%`, `*`, `"` or control characters | Servers use them to separate or match folder names | agent default |
+| Undo notice wording | "Conversation archived.", "Conversation moved to Trash.", "Conversation reported as spam.", "Conversation moved to Inbox.", "Conversation moved to <folder>." ("<n> conversations …" for several) | The spec named only the "Undo" action | agent default |
 | "Move to…" action | In v1 | Dragging is not possible at phone width | agent default |
 | Flags | Read/unread and one flag | Coloured flags deferred | user |
 | One mail server per deployment | Yes; no server field | Simpler login | user |

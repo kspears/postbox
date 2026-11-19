@@ -95,3 +95,17 @@ func TestMarkedFolderBeatsName(t *testing.T) {
 		}
 	}
 }
+
+func TestStoredOrderPlacesSiblings(t *testing.T) {
+	got := buildFolders([]*imap.ListData{list("INBOX"), list("Work"), list("Home"), list("Home/Bills"), list("Home/Garden"), list("Sent", imap.MailboxAttrSent)})
+	SortFolders(got, []string{"Work", "INBOX", "Home", "Home/Garden", "Home/Bills"})
+	var names []string
+	for _, f := range got {
+		names = append(names, f.Name)
+	}
+	// Sent is missing from the stored order, so it follows the folders that are in it.
+	want := []string{"Work", "INBOX", "Home", "Home/Garden", "Home/Bills", "Sent"}
+	if !slices.Equal(names, want) {
+		t.Errorf("got %v, want %v", names, want)
+	}
+}

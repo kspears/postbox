@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { Snippet } from 'svelte';
   import { attachmentURL, conversation, markRead, type ErrorCode, type Message, type Person } from './api';
   import MessageBody from './MessageBody.svelte';
   import { strings } from './strings';
@@ -12,8 +13,10 @@
     onError: (error: ErrorCode) => void;
     // Changes when the conversation's row in the list changes, so it is fetched again.
     refresh: string;
+    // The actions for this conversation.
+    children?: Snippet;
   }
-  const { account, folder, id, onBack, onRead, onError, refresh }: Props = $props();
+  const { account, folder, id, onBack, onRead, onError, refresh, children }: Props = $props();
 
   let messages = $state<Message[]>([]);
   let gone = $state(false);
@@ -76,6 +79,7 @@
 <section class="reading" aria-label="Reading pane">
   <div class="bar">
     <button type="button" class="back" onclick={onBack}>← {strings.reading.back}</button>
+    {@render children?.()}
   </div>
 
   {#if gone}
@@ -140,9 +144,16 @@
     background: var(--bg);
   }
 
+  .bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 1rem;
+  }
+
   /* The back button is for phone width, where the list is not on screen beside this pane. */
   @media (min-width: 768px) {
-    .bar {
+    .back {
       display: none;
     }
   }

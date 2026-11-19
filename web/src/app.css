@@ -8,6 +8,8 @@
   --hover: light-dark(#efefec, #2a2c2f);
   --selected: light-dark(#e3e9fb, #26304d);
   --accent: light-dark(#2f5bd3, #7b9cff);
+  /* The accent on a surface of the opposite scheme, as in the undo notice. */
+  --accent-on-dark: light-dark(#9db4ff, #2f5bd3);
   --on-accent: light-dark(#ffffff, #0d1430);
   --danger: light-dark(#a8261b, #ff9b8f);
   --danger-bg: light-dark(#fdecea, #3a1f1c);

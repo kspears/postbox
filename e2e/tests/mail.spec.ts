@@ -8,7 +8,7 @@ test.describe('folder list', () => {
     await signIn(page, alice, seedPassword());
     await expectInbox(page);
     const nav = page.getByRole('navigation', { name: 'Folders' });
-    await expect(nav.getByRole('button')).toHaveText([/^Inbox/, 'Drafts', 'Sent', 'Archive', 'Junk', 'Trash']);
+    await expect(nav.getByRole('button')).toHaveText([/^Inbox/, 'Drafts', 'Sent', 'Archive', 'Junk', 'Trash', '+ New folder']);
     // alice has four unread messages from the seed.
     await expect(nav.getByRole('button', { name: /^Inbox/ }).getByLabel('4 unread')).toBeVisible();
   });

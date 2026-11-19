@@ -6,6 +6,11 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 export COMPOSE_PROGRESS=quiet
+# This script tears its stack down with its volumes at the end. Pin which stack that is, so a
+# COMPOSE_PROJECT_NAME or COMPOSE_FILE left in the caller's environment (say, the dev stack's)
+# can never point it at another one.
+export COMPOSE_PROJECT_NAME=postbox-ci
+unset COMPOSE_FILE
 # Both seeded accounts share it. Hex only, so it needs no quoting anywhere.
 SEED_PASSWORD="ci-$(openssl rand -hex 12)"
 export SEED_PASSWORD

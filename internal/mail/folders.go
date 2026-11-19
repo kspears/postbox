@@ -139,14 +139,24 @@ func buildFolders(data []*imap.ListData) []Folder {
 // folders first (in roleOrder) and the rest by name. Comparing whole names would not do: a
 // space or "-" sorts before the delimiter, so "Foo Bar" would land between "Foo" and
 // "Foo/Child".
-func sortAsTree(folders []Folder) {
+func sortAsTree(folders []Folder) { SortFolders(folders, nil) }
+
+// SortFolders orders folders as a tree, like sortAsTree, but places siblings by their position
+// in order first, when they appear in it. order is the account's own arrangement (a Postbox
+// preference: IMAP has no folder order); folders missing from it follow in the default order.
+func SortFolders(folders []Folder, order []string) {
+	position := make(map[string]int, len(order))
+	for i, name := range order {
+		position[name] = i
+	}
 	byName := make(map[string]Folder, len(folders))
 	for _, f := range folders {
 		byName[f.Name] = f
 	}
 	type step struct {
-		rank  int
-		label string
+		position int
+		rank     int
+		label    string
 	}
 	// key lists, from the top, the rank and label of each of a folder's ancestors and itself.
 	key := func(f Folder) []step {
@@ -156,7 +166,11 @@ func sortAsTree(folders []Folder) {
 			if rank < 0 {
 				rank = len(roleOrder)
 			}
-			k = append(k, step{rank, strings.ToLower(f.Label)})
+			pos, ok := position[f.Name]
+			if !ok {
+				pos = len(order)
+			}
+			k = append(k, step{pos, rank, strings.ToLower(f.Label)})
 			if f.Parent == "" {
 				break
 			}
@@ -175,7 +189,7 @@ func sortAsTree(folders []Folder) {
 	}
 	slices.SortStableFunc(folders, func(a, b Folder) int {
 		return slices.CompareFunc(keys[a.Name], keys[b.Name], func(x, y step) int {
-			return cmp.Or(cmp.Compare(x.rank, y.rank), cmp.Compare(x.label, y.label))
+			return cmp.Or(cmp.Compare(x.position, y.position), cmp.Compare(x.rank, y.rank), cmp.Compare(x.label, y.label))
 		})
 	})
 }

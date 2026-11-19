@@ -1,17 +1,29 @@
 <script lang="ts">
   import {
     conversations as fetchConversations,
+    createFolder,
+    deleteFolder,
+    expunge,
     folders as fetchFolders,
+    move,
+    renameFolder,
+    saveFolderOrder,
+    setFlag,
     signOut,
     type Account,
     type Conversation,
+    type Destination,
     type ErrorCode,
     type Folder,
   } from './api';
   import { untrack } from 'svelte';
+  import { SvelteSet } from 'svelte/reactivity';
+  import ActionBar, { type Action } from './ActionBar.svelte';
   import ConversationList from './ConversationList.svelte';
   import ConversationView from './ConversationView.svelte';
+  import Dialog from './Dialog.svelte';
   import FolderList from './FolderList.svelte';
+  import UndoNotice, { type Notice } from './UndoNotice.svelte';
   import { closeConversation, openConversation, openFolder, route } from './route.svelte';
   import { strings } from './strings';
 
@@ -44,6 +56,23 @@
   let listLoaded = $state(false);
   // Bumped whenever the open folder changes, so answers for the old one are dropped.
   let generation = 0;
+
+  // Conversations moved away by an action here. They stay hidden even if a refresh that started
+  // before the move brings them back.
+  const hidden = new SvelteSet<number>();
+  const shownRows = $derived(rows.filter((r) => !hidden.has(r.id)));
+  // Ticked conversations, for actions and drags.
+  let checked = $state<number[]>([]);
+  // The conversations a drag carries, until it is dropped.
+  let dragged: number[] = [];
+  let notice = $state<Notice | null>(null);
+  // An action waiting on the person: a folder to move to, or a confirmation.
+  let asking = $state<
+    | { kind: 'moveTo'; ids: number[] }
+    | { kind: 'expunge'; ids: number[] }
+    | { kind: 'deleteFolder'; folder: Folder; text: string }
+    | null
+  >(null);
 
   // The open conversation's row: when a refresh changes it (a reply arrived, a message
   // went), the conversation is fetched again.
@@ -129,6 +158,8 @@
       listLoaded = false;
       listFailure = null;
       folderMissing = false;
+      hidden.clear();
+      checked = [];
       loadPage(true);
     });
   });
@@ -182,6 +213,185 @@
     }, 5_000);
     return () => clearInterval(timer);
   });
+
+  // --- actions on conversations ---
+
+  function failed(error: ErrorCode): void {
+    if (handle(error) === null) return;
+    notice = { text: strings.actions.failed };
+    refreshList();
+    loadFolders(true);
+  }
+
+  function rowsOf(ids: number[]): Conversation[] {
+    return rows.filter((r) => ids.includes(r.id));
+  }
+
+  // Moves conversations away at once (the list changes before the server answers), then tells
+  // the server, and offers an undo that moves the messages back by their new UIDs.
+  async function moveAway(ids: number[], dest: Destination, text: (n: number) => string): Promise<void> {
+    const targets = rowsOf(ids);
+    if (targets.length === 0) return;
+    const folder = route.folder;
+    const uids = targets.flatMap((r) => r.uids);
+    for (const r of targets) hidden.add(r.id);
+    checked = checked.filter((id) => !ids.includes(id));
+    if (route.conversation && ids.includes(route.conversation)) closeConversation();
+    const result = await move(folder, uids, dest);
+    if (!result.ok) {
+      for (const r of targets) hidden.delete(r.id);
+      return failed(result.error);
+    }
+    loadFolders(true);
+    const moved = result.value;
+    notice = {
+      text: text(targets.length),
+      undo: async () => {
+        const back = await move(moved.folder, moved.uids, { to: folder });
+        if (!back.ok) return failed(back.error);
+        if (route.folder === folder) await refreshList();
+        loadFolders(true);
+      },
+    };
+  }
+
+  // Read, unread, flag and unflag change the rows at once, then the server.
+  async function flagAway(ids: number[], flag: 'seen' | 'flagged', on: boolean): Promise<void> {
+    const targets = rowsOf(ids);
+    if (targets.length === 0) return;
+    // Flagging marks the latest message; unflagging and read state cover every message.
+    const uids = flag === 'flagged' && on ? targets.map((r) => r.uids.at(-1)!) : targets.flatMap((r) => r.uids);
+    for (const r of targets) {
+      if (flag === 'seen') r.unread = !on;
+      else r.flagged = on;
+    }
+    const result = await setFlag(route.folder, uids, flag, on);
+    if (!result.ok) return failed(result.error);
+    if (flag === 'seen') loadFolders(true);
+  }
+
+  function act(action: Action, ids: number[]): void {
+    const role = currentFolder?.role;
+    switch (action) {
+      case 'archive':
+        return void moveAway(ids, { role: 'archive' }, strings.actions.archived);
+      case 'delete':
+        if (role === 'trash') {
+          asking = { kind: 'expunge', ids };
+          return;
+        }
+        return void moveAway(ids, { role: 'trash' }, strings.actions.trashed);
+      case 'spam':
+        return void moveAway(ids, { role: 'junk' }, strings.actions.spammed);
+      case 'notSpam':
+        return void moveAway(ids, { role: 'inbox' }, strings.actions.unspammed);
+      case 'moveTo':
+        asking = { kind: 'moveTo', ids };
+        return;
+      case 'read':
+      case 'unread':
+        return void flagAway(ids, 'seen', action === 'read');
+      case 'flag':
+      case 'unflag':
+        return void flagAway(ids, 'flagged', action === 'flag');
+    }
+  }
+
+  function moveTo(ids: number[], folder: Folder): void {
+    asking = null;
+    void moveAway(ids, { to: folder.name }, (n) => strings.actions.moved(n, folder.label));
+  }
+
+  async function expungeNow(ids: number[]): Promise<void> {
+    asking = null;
+    const targets = rowsOf(ids);
+    for (const r of targets) hidden.add(r.id);
+    checked = checked.filter((id) => !ids.includes(id));
+    if (route.conversation && ids.includes(route.conversation)) closeConversation();
+    const result = await expunge(route.folder, targets.flatMap((r) => r.uids));
+    if (!result.ok) {
+      for (const r of targets) hidden.delete(r.id);
+      return failed(result.error);
+    }
+    loadFolders(true);
+  }
+
+  const checkedRows = $derived(rowsOf(checked));
+
+  // --- folders ---
+
+  async function create(parent: string, label: string): Promise<ErrorCode | null> {
+    const result = await createFolder(parent, label);
+    if (!result.ok) return result.error;
+    await loadFolders(true);
+    return null;
+  }
+
+  async function rename(folder: Folder, label: string): Promise<ErrorCode | null> {
+    const result = await renameFolder(folder.name, folder.parent ?? '', label);
+    if (!result.ok) return result.error;
+    if (route.folder === folder.name) openFolder(result.value.name);
+    await loadFolders(true);
+    return null;
+  }
+
+  function descendants(folder: Folder): Folder[] {
+    // The list is ordered as a tree, so a folder's parent always comes before it.
+    const out: Folder[] = [];
+    for (const f of folderList) {
+      if (f.parent && (f.parent === folder.name || out.some((d) => d.name === f.parent))) out.push(f);
+    }
+    return out;
+  }
+
+  function askDelete(folder: Folder): void {
+    const under = descendants(folder);
+    const messages = [folder, ...under].reduce((n, f) => n + f.total, 0);
+    const text = under.length
+      ? strings.folders.confirmDeleteWithSubfolders(folder.label, under.length, messages)
+      : strings.folders.confirmDelete(folder.label, messages);
+    asking = { kind: 'deleteFolder', folder, text };
+  }
+
+  async function deleteNow(folder: Folder): Promise<void> {
+    asking = null;
+    const gone = new Set([folder.name, ...descendants(folder).map((f) => f.name)]);
+    folderList = folderList.filter((f) => !gone.has(f.name));
+    if (gone.has(route.folder)) openFolder('INBOX');
+    const result = await deleteFolder(folder.name);
+    if (!result.ok) failed(result.error);
+    loadFolders(true);
+  }
+
+  // Nesting renames the folder under its new parent; reordering stores the arrangement, which
+  // is Postbox's own since IMAP has no folder order.
+  async function moveFolder(folder: Folder, target: Folder, zone: 'before' | 'into' | 'after'): Promise<void> {
+    let name = folder.name;
+    const parent = zone === 'into' ? target.name : (target.parent ?? '');
+    if (parent !== (folder.parent ?? '')) {
+      const result = await renameFolder(folder.name, parent, folder.label);
+      if (!result.ok) {
+        notice = { text: result.error === 'folder_exists' ? strings.folders.exists(folder.label) : strings.actions.failed };
+        return;
+      }
+      name = result.value.name;
+      if (route.folder === folder.name) openFolder(name);
+      await loadFolders(true);
+    }
+    if (zone === 'into') return;
+
+    // The moved folder and everything under it go before or after the target and its subtree.
+    const moved = folderList.find((f) => f.name === name);
+    const anchor = folderList.find((f) => f.name === target.name);
+    if (!moved || !anchor) return;
+    const block = [moved, ...descendants(moved)];
+    const rest = folderList.filter((f) => !block.includes(f));
+    let at = rest.indexOf(anchor);
+    if (zone === 'after') at += 1 + descendants(anchor).length;
+    folderList = [...rest.slice(0, at), ...block, ...rest.slice(at)];
+    const saved = await saveFolderOrder(folderList.map((f) => f.name));
+    if (!saved.ok) failed(saved.error);
+  }
 
   // The sign-in screen appears only once the server confirms: showing it after a failed
   // "Sign out everywhere" would let someone believe a stolen session had ended.
@@ -242,6 +452,15 @@
         showFolders = false;
         openFolder(name);
       }}
+      onDropConversations={(name) => {
+        const target = folderList.find((f) => f.name === name);
+        if (target) moveTo(dragged, target);
+        dragged = [];
+      }}
+      onCreate={create}
+      onRename={rename}
+      onDelete={askDelete}
+      onMoveFolder={moveFolder}
     />
 
     <div class="middle">
@@ -251,16 +470,31 @@
         </button>
         <h1>{currentFolder?.label ?? route.folder}</h1>
       </div>
+      {#if checkedRows.length > 0}
+        <div class="selection">
+          <span>{strings.actions.selected(checkedRows.length)}</span>
+          <button type="button" class="clear" onclick={() => (checked = [])}>{strings.actions.clearSelection}</button>
+          <ActionBar
+            role={currentFolder?.role}
+            unread={checkedRows.some((r) => r.unread)}
+            flagged={checkedRows.some((r) => r.flagged)}
+            onAction={(a) => act(a, checked)}
+          />
+        </div>
+      {/if}
       {#if folderMissing}
         <p class="note">{strings.folders.missing}</p>
       {:else}
         <ConversationList
           account={account.account}
-          conversations={rows}
+          conversations={shownRows}
           loading={loading || !listLoaded}
           hasMore={next !== undefined}
           folder={route.folder}
           selected={route.conversation}
+          {checked}
+          onCheck={(ids) => (checked = ids)}
+          onDrag={(ids) => (dragged = ids)}
           onMore={() => loadPage(false)}
           onOpen={openConversation}
         />
@@ -276,7 +510,16 @@
         onRead={markedRead}
         onError={(e) => (listFailure = handle(e))}
         refresh={openRowState}
-      />
+      >
+        {#if openRow}
+          <ActionBar
+            role={currentFolder?.role}
+            unread={openRow.unread}
+            flagged={openRow.flagged}
+            onAction={(a) => openRow && act(a, [openRow.id])}
+          />
+        {/if}
+      </ConversationView>
     {:else}
       <section class="empty" aria-label="Reading pane">
         <p class="note">{strings.reading.nothingSelected}</p>
@@ -284,6 +527,43 @@
     {/if}
   </div>
 </div>
+
+{#if notice}
+  <UndoNotice {notice} onDone={() => (notice = null)} />
+{/if}
+
+{#if asking?.kind === 'moveTo'}
+  {@const ids = asking.ids}
+  <Dialog label={strings.actions.moveHeading} onClose={() => (asking = null)}>
+    <h2 class="dialog-title">{strings.actions.moveHeading}</h2>
+    <ul class="picker">
+      {#each folderList.filter((f) => f.selectable && f.name !== route.folder) as f (f.name)}
+        <li><button type="button" onclick={() => moveTo(ids, f)}>{f.parent ? `${f.parent} / ${f.label}` : f.label}</button></li>
+      {/each}
+    </ul>
+    <div class="buttons">
+      <button type="button" onclick={() => (asking = null)}>{strings.actions.cancel}</button>
+    </div>
+  </Dialog>
+{:else if asking?.kind === 'expunge'}
+  {@const ids = asking.ids}
+  <Dialog label={strings.actions.deleteForever} onClose={() => (asking = null)}>
+    <p>{strings.actions.deleteForever}</p>
+    <div class="buttons">
+      <button type="button" onclick={() => (asking = null)}>{strings.actions.cancel}</button>
+      <button type="button" class="danger" onclick={() => expungeNow(ids)}>{strings.actions.confirmDelete}</button>
+    </div>
+  </Dialog>
+{:else if asking?.kind === 'deleteFolder'}
+  {@const folder = asking.folder}
+  <Dialog label={asking.text} onClose={() => (asking = null)}>
+    <p>{asking.text}</p>
+    <div class="buttons">
+      <button type="button" onclick={() => (asking = null)}>{strings.actions.cancel}</button>
+      <button type="button" class="danger" onclick={() => deleteNow(folder)}>{strings.actions.confirmDelete}</button>
+    </div>
+  </Dialog>
+{/if}
 
 <style>
   .shell {
@@ -386,6 +666,73 @@
     .folders-button {
       display: inline-block !important;
     }
+  }
+
+  .selection {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 0.75rem;
+    padding: 0.5rem 1rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    font-size: 0.9rem;
+  }
+
+  .clear {
+    border: none;
+    background: transparent;
+    color: var(--accent);
+    cursor: pointer;
+  }
+
+  .dialog-title {
+    margin: 0 0 0.75rem;
+    font-size: 1.1rem;
+  }
+
+  .picker {
+    list-style: none;
+    margin: 0 0 1rem;
+    padding: 0;
+    max-height: 18rem;
+    overflow-y: auto;
+  }
+
+  .picker button {
+    width: 100%;
+    text-align: left;
+    border: none;
+    background: transparent;
+    color: var(--text);
+    padding: 0.5rem 0.6rem;
+    border-radius: 0.4rem;
+    cursor: pointer;
+  }
+
+  .picker button:hover {
+    background: var(--hover);
+  }
+
+  .buttons {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+  }
+
+  .buttons button {
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    padding: 0.45rem 0.9rem;
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+  }
+
+  .buttons .danger {
+    border-color: var(--danger);
+    background: var(--danger);
+    color: var(--on-accent);
   }
 
   .title {

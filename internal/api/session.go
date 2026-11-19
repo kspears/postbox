@@ -27,6 +27,7 @@ const (
 	errSignedOut        = "signed_out"
 	errPasswordChanged  = "password_changed"
 	errNoFolder         = "no_folder"
+	errFolderExists     = "folder_exists"
 	errBadRequest       = "bad_request"
 	errInternal         = "internal"
 )
