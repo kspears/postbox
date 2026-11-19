@@ -15,6 +15,7 @@ const knownErrors = [
   'passkey_no_key',
   'passkey_failed',
   'passkey_required',
+  'confirm_needed',
   'internal',
 ] as const;
 export type ErrorCode = (typeof knownErrors)[number];
@@ -85,12 +86,38 @@ export interface ConversationPage {
 
 export type Result<T> = { ok: true; value: T } | { ok: false; error: ErrorCode };
 
+// The confirmation token: proof that this tab signed in or entered the password in the last ten
+// minutes, which changing passkeys needs. It lives in this tab only, never in a cookie, so a
+// copy of the session cookie alone cannot change passkeys.
+const confirmKey = 'postbox.confirm';
+
+function confirmToken(): string | null {
+  try {
+    return sessionStorage.getItem(confirmKey);
+  } catch {
+    return null;
+  }
+}
+
+function keepConfirmToken(token: string | null): void {
+  try {
+    if (token) sessionStorage.setItem(confirmKey, token);
+    else sessionStorage.removeItem(confirmKey);
+  } catch {
+    // Without storage, changing passkeys asks for the password each time.
+  }
+}
+
 async function call<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<Result<T>> {
+  const headers: Record<string, string> = {};
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  const token = confirmToken();
+  if (token) headers['X-Postbox-Confirm'] = token;
   let response: Response;
   try {
     response = await fetch(path, {
       method,
-      headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+      headers,
       body: body === undefined ? undefined : JSON.stringify(body),
       credentials: 'same-origin',
       signal,
@@ -100,7 +127,9 @@ async function call<T>(method: string, path: string, body?: unknown, signal?: Ab
     return { ok: false, error: 'internal' };
   }
   if (response.ok) {
-    const value = response.status === 204 ? undefined : await response.json();
+    const value: unknown = response.status === 204 ? undefined : await response.json();
+    // Signing in and entering the password again answer with a new token.
+    if (value && typeof value === 'object' && 'confirm' in value && typeof value.confirm === 'string') keepConfirmToken(value.confirm);
     return { ok: true, value: value as T };
   }
   try {
@@ -126,6 +155,7 @@ export function signIn(email: string, password: string, keep: boolean): Promise<
 /** True once the server has ended the session(s); a session that was already gone counts. */
 export async function signOut(everywhere: boolean): Promise<boolean> {
   const result = await call<void>('DELETE', everywhere ? '/api/sessions' : '/api/session');
+  keepConfirmToken(null);
   return result.ok || result.error === 'signed_out';
 }
 
@@ -504,6 +534,11 @@ export async function unlockNewPasskey(p: NewPasskey): Promise<NewPasskey | type
  * server has no key to stand in. */
 export function savePasskey(p: NewPasskey): Promise<Result<Passkey>> {
   return call('POST', '/api/passkeys', { nonce: p.nonce, credential: p.credential, prf: p.prf });
+}
+
+/** Enters the password again, which lets this session change passkeys for a while. */
+export function confirmPassword(password: string): Promise<Result<{ confirm: string }>> {
+  return call('POST', '/api/session/confirm', { password });
 }
 
 export function removePasskey(id: string): Promise<Result<{ requirePasskey: boolean }>> {

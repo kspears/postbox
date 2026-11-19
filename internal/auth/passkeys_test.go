@@ -193,3 +193,25 @@ func TestUnknownPasskeysDoNotBlockTheIP(t *testing.T) {
 		t.Errorf("password sign-in after unknown passkeys: %v", err)
 	}
 }
+
+// Entering the password again is checked against the session's own; wrong ones count against
+// the throttle.
+func TestConfirmPassword(t *testing.T) {
+	a, logins, _ := newFakeAuth(t)
+	ctx := context.Background()
+	const account = "a@example.test"
+	if err := a.ConfirmPassword(ctx, client, account, "pw", "pw"); err != nil {
+		t.Errorf("right: %v", err)
+	}
+	for range maxPerAccountIP {
+		if err := a.ConfirmPassword(ctx, client, account, "guess", "pw"); !errors.Is(err, ErrWrongPassword) {
+			t.Fatalf("wrong: %v", err)
+		}
+	}
+	if err := a.ConfirmPassword(ctx, client, account, "pw", "pw"); !errors.Is(err, ErrThrottled) {
+		t.Errorf("after five wrong: %v", err)
+	}
+	if n := logins.Load(); n != 0 {
+		t.Errorf("asked the mail server %d times", n)
+	}
+}

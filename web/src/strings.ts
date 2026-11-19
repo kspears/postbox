@@ -68,6 +68,10 @@ export const strings = {
     passkeyFailed: "Couldn't add the passkey. Try again.",
     requirePasskey: 'Require passkey',
     requireNote: 'This protects Postbox only. Your password still works in other mail apps.',
+    confirm: 'Enter your password to change passkeys.',
+    confirmPassword: 'Password',
+    confirmContinue: 'Continue',
+    wrongPassword: 'Wrong password.',
   },
 
   folders: {

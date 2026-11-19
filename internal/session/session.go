@@ -9,6 +9,8 @@ package session
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"errors"
 	"net/http"
@@ -39,10 +41,24 @@ var ErrNoSession = errors.New("no session")
 
 // Session is a signed-in account with its password unsealed.
 type Session struct {
-	ID       string
-	Account  string
-	Password string
-	Method   string
+	ID             string
+	Account        string
+	Password       string
+	Method         string
+	confirmedUntil time.Time
+	confirmHash    []byte
+}
+
+// ConfirmLife is how long signing in, or entering the password again, lets a browser tab change
+// passkeys and "Require passkey". The tab proves it with a confirmation token that only it
+// holds, so a copy of the session cookie alone cannot.
+const ConfirmLife = 10 * time.Minute
+
+// newConfirmation returns a confirmation token and its SHA-256, which is all the server keeps.
+func newConfirmation() (string, []byte) {
+	token := rand.Text()
+	sum := sha256.Sum256([]byte(token))
+	return token, sum[:]
 }
 
 // Manager creates and checks sessions.
@@ -63,15 +79,17 @@ func NewManager(st *store.Store, clk *clock.Clock, secure bool) *Manager {
 	return &Manager{store: st, clock: clk, cookie: name, secure: secure}
 }
 
-// Create starts a session for account and returns the cookie that carries it. keep is the
-// "Keep me signed in" box; passkey sessions always last long.
-func (m *Manager) Create(ctx context.Context, account, password, method string, keep bool) (*http.Cookie, error) {
+// Create starts a session for account and returns the cookie that carries it, and the
+// confirmation token that lets this tab change passkeys for ConfirmLife. keep is the "Keep me
+// signed in" box; passkey sessions always last long.
+func (m *Manager) Create(ctx context.Context, account, password, method string, keep bool) (*http.Cookie, string, error) {
 	idText, key := rand.Text(), make([]byte, 32)
 	rand.Read(key)
+	confirmToken, confirmHash := newConfirmation()
 
 	sealed, err := seal(key, idText, account, password)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	now := m.clock.Now()
 	long := keep || method == Passkey
@@ -81,10 +99,11 @@ func (m *Manager) Create(ctx context.Context, account, password, method string, 
 	}
 	err = m.store.CreateSession(ctx, store.Session{
 		ID: idText, Account: account, Sealed: sealed, Method: method,
+		ConfirmedUntil: now.Add(ConfirmLife), ConfirmHash: confirmHash,
 		CreatedAt: now, ExpiresAt: now.Add(life),
 	})
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	c := m.newCookie(idText + "." + base64.RawURLEncoding.EncodeToString(key))
@@ -92,7 +111,7 @@ func (m *Manager) Create(ctx context.Context, account, password, method string, 
 		// Max-Age counts from the browser's own clock; the server's expiry is what decides.
 		c.MaxAge = int(life / time.Second)
 	}
-	return c, nil
+	return c, confirmToken, nil
 }
 
 // FromRequest returns the request's session, or ErrNoSession.
@@ -122,7 +141,37 @@ func (m *Manager) FromRequest(r *http.Request) (*Session, error) {
 		// The id is right but the key is not: a forged or corrupted cookie.
 		return nil, ErrNoSession
 	}
-	return &Session{ID: idText, Account: row.Account, Password: password, Method: row.Method}, nil
+	return &Session{
+		ID: idText, Account: row.Account, Password: password, Method: row.Method,
+		confirmedUntil: row.ConfirmedUntil, confirmHash: row.ConfirmHash,
+	}, nil
+}
+
+// Confirmed reports whether a request of s carrying token may change passkeys and "Require
+// passkey" now.
+func (m *Manager) Confirmed(s *Session, token string) bool {
+	if token == "" || s.confirmHash == nil || !m.clock.Now().Before(s.confirmedUntil) {
+		return false
+	}
+	sum := sha256.Sum256([]byte(token))
+	return subtle.ConstantTimeCompare(sum[:], s.confirmHash) == 1
+}
+
+// Confirm lets the tab that entered the password change passkeys and "Require passkey" for
+// ConfirmLife from now, and returns the token it proves that with. The caller has checked the
+// password. A session ended meanwhile is ErrNoSession.
+func (m *Manager) Confirm(ctx context.Context, s *Session) (string, error) {
+	token, hash := newConfirmation()
+	until := m.clock.Now().Add(ConfirmLife)
+	err := m.store.ConfirmSession(ctx, s.ID, hash, until)
+	if errors.Is(err, store.ErrNotFound) {
+		return "", ErrNoSession
+	}
+	if err != nil {
+		return "", err
+	}
+	s.confirmedUntil, s.confirmHash = until, hash
+	return token, nil
 }
 
 // End signs out one session and returns a cookie that removes it from the browser.
