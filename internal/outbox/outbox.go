@@ -16,6 +16,7 @@ import (
 	"github.com/emersion/go-message"
 	gomail "github.com/emersion/go-message/mail"
 
+	"github.com/kspears/postbox/internal/addressbook"
 	"github.com/kspears/postbox/internal/mail"
 	"github.com/kspears/postbox/internal/store"
 )
@@ -45,18 +46,20 @@ type Outbox struct {
 	store  *store.Store
 	pool   *mail.Pool
 	submit *mail.Submitter
+	book   *addressbook.Book
 
 	mu      sync.Mutex
 	waiting map[string]*time.Timer
 }
 
 // New returns an Outbox. Messages that were in the window or being handed over when Postbox last
-// stopped are settled first (see store.SettleInterruptedSends).
-func New(ctx context.Context, st *store.Store, pool *mail.Pool, submit *mail.Submitter) (*Outbox, error) {
+// stopped are settled first (see store.SettleInterruptedSends). The people a message was sent to
+// are remembered in book.
+func New(ctx context.Context, st *store.Store, pool *mail.Pool, submit *mail.Submitter, book *addressbook.Book) (*Outbox, error) {
 	if err := st.SettleInterruptedSends(ctx); err != nil {
 		return nil, err
 	}
-	return &Outbox{store: st, pool: pool, submit: submit, waiting: map[string]*time.Timer{}}, nil
+	return &Outbox{store: st, pool: pool, submit: submit, book: book, waiting: map[string]*time.Timer{}}, nil
 }
 
 // Queue starts the undo window for the draft at draftsFolder/uid and returns the send's id. When
@@ -181,6 +184,8 @@ func (o *Outbox) deliver(ctx context.Context, id string, acct mail.Account, draf
 		return outcome{Failed, Unreachable, ""}
 	}
 
+	o.book.Collect(ctx, acct.Name, recipients(raw))
+
 	// Sent. The copy goes to Sent with its Bcc line, as the sender should see it.
 	if err := o.pool.Do(ctx, acct, func(c *mail.Conn) error { return c.FileSent(raw) }); err != nil {
 		log.Printf("outbox %s: file in Sent: %v", id, err)
@@ -221,6 +226,24 @@ func envelope(raw []byte) (mail.Envelope, []byte, error) {
 		return env, nil, errors.New("the message has no recipients")
 	}
 	return env, withoutBcc(raw), nil
+}
+
+// recipients returns the people a saved message is addressed to in To, Cc and Bcc, with their
+// display names.
+func recipients(raw []byte) []store.Address {
+	entity, err := message.Read(bytes.NewReader(raw))
+	if err != nil && !message.IsUnknownCharset(err) && !message.IsUnknownEncoding(err) {
+		return nil
+	}
+	h := gomail.Header{Header: entity.Header}
+	var people []store.Address
+	for _, key := range []string{"To", "Cc", "Bcc"} {
+		addrs, _ := h.AddressList(key)
+		for _, a := range addrs {
+			people = append(people, store.Address{Name: a.Name, Email: a.Address})
+		}
+	}
+	return people
 }
 
 // withoutBcc removes the Bcc header (and its folded lines) from a message's top header.

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kspears/postbox/internal/addressbook"
 	"github.com/kspears/postbox/internal/auth"
 	"github.com/kspears/postbox/internal/clock"
 	"github.com/kspears/postbox/internal/mail"
@@ -31,10 +32,12 @@ func newHandler(t *testing.T, dist fs.FS) http.Handler {
 	t.Cleanup(func() { st.Close() })
 	clk := &clock.Clock{}
 	server := &mail.Server{IMAPAddr: "127.0.0.1:1", TLS: &tls.Config{}}
+	pool := mail.NewPool(t.Context(), server, clk.Now)
 	return NewHandler(dist, Deps{
 		Sessions:       session.NewManager(st, clk, true),
 		Auth:           auth.New(st, clk, server),
-		Mail:           mail.NewPool(t.Context(), server, clk.Now),
+		Mail:           pool,
+		Addresses:      addressbook.New(st, pool),
 		Store:          st,
 		Watch:          mail.NewWatcher(server),
 		Submit:         &mail.Submitter{Addr: "127.0.0.1:1", TLS: &tls.Config{}},

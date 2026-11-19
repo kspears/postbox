@@ -104,6 +104,7 @@ func (a *apiHandler) signIn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.SetCookie(w, cookie)
+	a.Addresses.SeedOnce(mail.Account{ClientIP: a.clientIP(r), Name: account, Password: req.Password})
 	writeJSON(w, http.StatusOK, whoAmI{Account: account, Method: session.Password})
 }
 

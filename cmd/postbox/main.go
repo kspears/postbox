@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/kspears/postbox/internal/addressbook"
 	"github.com/kspears/postbox/internal/api"
 	"github.com/kspears/postbox/internal/auth"
 	"github.com/kspears/postbox/internal/clock"
@@ -65,7 +66,8 @@ func serve() error {
 	clk := &clock.Clock{}
 	sessions := session.NewManager(st, clk, cfg.PublicURL.Scheme == "https")
 	pool := mail.NewPool(ctx, server, clk.Now)
-	out, err := outbox.New(ctx, st, pool, submit)
+	book := addressbook.New(st, pool)
+	out, err := outbox.New(ctx, st, pool, submit, book)
 	if err != nil {
 		return fmt.Errorf("POSTBOX_STATE: %w", err)
 	}
@@ -81,6 +83,7 @@ func serve() error {
 			Mail:           pool,
 			Submit:         submit,
 			Outbox:         out,
+			Addresses:      book,
 			Store:          st,
 			Watch:          mail.NewWatcher(server),
 			Stopping:       ctx,

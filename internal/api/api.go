@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/kspears/postbox/internal/addressbook"
 	"github.com/kspears/postbox/internal/auth"
 	"github.com/kspears/postbox/internal/clock"
 	"github.com/kspears/postbox/internal/mail"
@@ -24,6 +25,8 @@ type Deps struct {
 	Watch    *mail.Watcher
 	Submit   *mail.Submitter
 	Outbox   *outbox.Outbox
+	// Addresses remembers who the person has sent mail to, for autocomplete.
+	Addresses *addressbook.Book
 	// Stopping ends when Postbox is shutting down, so open event streams can end and let it.
 	Stopping context.Context
 	Store    *store.Store
@@ -67,6 +70,7 @@ func NewHandler(dist fs.FS, d Deps) http.Handler {
 	mux.HandleFunc("POST /api/send", a.withSession(a.send))
 	mux.HandleFunc("POST /api/send/undo", a.withSession(a.undoSend))
 	mux.HandleFunc("GET /api/send", a.withSession(a.sendStatus))
+	mux.HandleFunc("GET /api/addresses", a.withSession(a.addresses))
 	mux.HandleFunc("GET /api/notices", a.withSession(a.notices))
 	mux.HandleFunc("POST /api/notices/dismiss", a.withSession(a.dismissNotice))
 	testRoutes(mux, a)
