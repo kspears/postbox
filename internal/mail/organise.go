@@ -92,11 +92,16 @@ func (c *Conn) Expunge(folder string, uids []imap.UID) error {
 			return ErrNotTrash
 		}
 	}
+	return c.remove(folder, uids)
+}
+
+// remove deletes uids in folder for good, with no question about which folder it is.
+func (c *Conn) remove(folder string, uids []imap.UID) error {
 	if _, err := c.Client.Select(folder, nil).Wait(); err != nil {
 		return err
 	}
 	set := imap.UIDSetNum(uids...)
-	err = c.Store(set, &imap.StoreFlags{Op: imap.StoreFlagsAdd, Silent: true, Flags: []imap.Flag{imap.FlagDeleted}}, nil).Close()
+	err := c.Store(set, &imap.StoreFlags{Op: imap.StoreFlagsAdd, Silent: true, Flags: []imap.Flag{imap.FlagDeleted}}, nil).Close()
 	if err != nil {
 		return err
 	}

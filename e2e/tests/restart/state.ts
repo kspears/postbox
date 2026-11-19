@@ -2,3 +2,4 @@
 // password). .state is a volume, so it outlives the test container.
 export const restartState = '.state/restart.json';
 export const changerState = '.state/changer.json';
+export const senderState = '.state/sender.json';

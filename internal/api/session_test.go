@@ -37,6 +37,7 @@ func newHandler(t *testing.T, dist fs.FS) http.Handler {
 		Mail:           mail.NewPool(t.Context(), server, clk.Now),
 		Store:          st,
 		Watch:          mail.NewWatcher(server),
+		Submit:         &mail.Submitter{Addr: "127.0.0.1:1", TLS: &tls.Config{}},
 		Stopping:       t.Context(),
 		Clock:          clk,
 		Origin:         origin,

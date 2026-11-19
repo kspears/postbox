@@ -16,6 +16,7 @@ import (
 
 type apiHandler struct {
 	Deps
+	sizes sizeLimits
 }
 
 // Error codes the browser turns into the spec's messages. The API never sends user-facing text,

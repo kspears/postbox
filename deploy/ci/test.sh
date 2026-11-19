@@ -112,10 +112,21 @@ docker compose up --detach postbox-untrusted
 docker compose run --rm -T -e POSTBOX_URL=http://postbox-untrusted.localhost e2e --project untrusted
 docker compose logs --no-color postbox-untrusted | grep -q 'certificate' || fail "postbox-untrusted did not log the certificate error"
 
+step "criterion 20: with no special-use folders, the Sent copy goes to \"Sent Items\""
+docker compose up --detach dovecot-plain postbox-plain
+for _ in $(seq 50); do
+	docker compose exec -T dovecot-plain doveadm mailbox create -u writer@example.test "Sent Items" 2>/dev/null && break
+	sleep 0.2
+done
+docker compose run --rm -T -e POSTBOX_URL=http://postbox-plain.localhost e2e --project plain
+
 step "criterion 7: sessions survive a restart; a changed password signs the session out"
 # The accounts file lives in a volume; the init image has sed.
 docker compose run --rm --no-deps -T --entrypoint sh init -c \
 	'sed -i "s/^changer@example.test:{PLAIN}.*/changer@example.test:{PLAIN}changed-$(date +%s)::::::/" /auth/users'
+# Criterion 24, restart half: a message sent just before the restart is still in its undo
+# window when Postbox stops, so it must stay in Drafts and never be delivered.
+docker compose run --rm -T e2e --project send-before-restart
 docker compose restart postbox
 docker compose run --rm -T e2e --project restart-after
 

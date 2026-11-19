@@ -592,6 +592,9 @@ performance panel, median of five tries.
 | Folder names typed in Postbox | No `/`, `.`, `\`, `%`, `*`, `"` or control characters | Servers use them to separate or match folder names | agent default |
 | Undo notice wording | "Conversation archived.", "Conversation moved to Trash.", "Conversation reported as spam.", "Conversation moved to Inbox.", "Conversation moved to <folder>." ("<n> conversations …" for several) | The spec named only the "Undo" action | agent default |
 | Undo notice timing | Ten seconds, paused while the pointer or keyboard focus is on it | Reaching for "Undo" must not be a race (WCAG 2.2.1) | agent default |
+| HTML part of a plain-text message | Made from the text: escaped, line breaks kept, links and quoted lines marked | Every message goes out with both parts, as criterion 21 asks, before the rich-text editor exists | agent default |
+| Reply to one's own message | Goes to the original recipients, or back to oneself when there were none | Matches other mail clients | agent default |
+| Submission port | 465 is TLS from the start; any other port must offer STARTTLS, which is used | No plaintext submission | agent default |
 | Permanent delete | Only in the Trash folder, checked by the server | A request for it anywhere else is refused, so a mistake cannot wipe Inbox | agent default |
 | "Move to…" action | In v1 | Dragging is not possible at phone width | agent default |
 | Flags | Read/unread and one flag | Coloured flags deferred | user |

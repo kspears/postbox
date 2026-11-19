@@ -11,6 +11,7 @@ import (
 	"github.com/kspears/postbox/internal/auth"
 	"github.com/kspears/postbox/internal/clock"
 	"github.com/kspears/postbox/internal/mail"
+	"github.com/kspears/postbox/internal/outbox"
 	"github.com/kspears/postbox/internal/session"
 	"github.com/kspears/postbox/internal/store"
 )
@@ -21,6 +22,8 @@ type Deps struct {
 	Auth     *auth.Authenticator
 	Mail     *mail.Pool
 	Watch    *mail.Watcher
+	Submit   *mail.Submitter
+	Outbox   *outbox.Outbox
 	// Stopping ends when Postbox is shutting down, so open event streams can end and let it.
 	Stopping context.Context
 	Store    *store.Store
@@ -58,6 +61,14 @@ func NewHandler(dist fs.FS, d Deps) http.Handler {
 	mux.HandleFunc("POST /api/folders/rename", a.withSession(a.renameFolder))
 	mux.HandleFunc("POST /api/folders/delete", a.withSession(a.deleteFolder))
 	mux.HandleFunc("PUT /api/folder-order", a.withSession(a.folderOrder))
+	mux.HandleFunc("GET /api/compose", a.withSession(a.composer))
+	mux.HandleFunc("POST /api/drafts", a.withSession(a.saveDraftHandler))
+	mux.HandleFunc("POST /api/drafts/discard", a.withSession(a.discardDraft))
+	mux.HandleFunc("POST /api/send", a.withSession(a.send))
+	mux.HandleFunc("POST /api/send/undo", a.withSession(a.undoSend))
+	mux.HandleFunc("GET /api/send", a.withSession(a.sendStatus))
+	mux.HandleFunc("GET /api/notices", a.withSession(a.notices))
+	mux.HandleFunc("POST /api/notices/dismiss", a.withSession(a.dismissNotice))
 	testRoutes(mux, a)
 	mux.Handle("/api/", http.NotFoundHandler())
 	mux.Handle("/", frontend(dist))

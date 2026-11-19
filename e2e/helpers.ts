@@ -142,3 +142,23 @@ export async function foldersOf(account: string): Promise<string[]> {
   const out = await imap(account, ['LIST "" "*"']);
   return [...out.matchAll(/^\* LIST \([^)]*\) "[^"]*" (?:"((?:[^"\\]|\\.)*)"|(\S+))$/gm)].map((m) => (m[1] ?? m[2]!).replace(/\\(.)/g, '$1'));
 }
+
+/** Opens the composer, fills it and returns it, ready to send. */
+export async function writeMessage(page: Page, to: string, subject: string, body: string) {
+  await page.getByRole('button', { name: 'Compose', exact: true }).click();
+  const composer = page.getByRole('region', { name: 'New message' });
+  await composer.getByLabel('To', { exact: true }).fill(to);
+  await composer.getByLabel('Subject').fill(subject);
+  const named = page.getByRole('region', { name: subject });
+  await named.getByLabel('Message').fill(body);
+  return named;
+}
+
+/** The MIME types in a message's structure, as another IMAP client sees it. */
+export async function structureOf(account: string, folder: string, subject: string): Promise<string> {
+  const out = await imap(account, [`EXAMINE ${quoted(folder)}`, `SEARCH SUBJECT ${quoted(subject)}`]);
+  const id = /^\* SEARCH (\d+)/m.exec(out)?.[1];
+  if (!id) return '';
+  const fetched = await imap(account, [`EXAMINE ${quoted(folder)}`, `FETCH ${id} BODYSTRUCTURE`]);
+  return fetched.toLowerCase();
+}

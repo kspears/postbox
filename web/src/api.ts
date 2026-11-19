@@ -9,6 +9,7 @@ const knownErrors = [
   'no_folder',
   'not_found',
   'folder_exists',
+  'too_late',
   'internal',
 ] as const;
 export type ErrorCode = (typeof knownErrors)[number];
@@ -202,4 +203,82 @@ export function deleteFolder(folder: string): Promise<Result<void>> {
 
 export function saveFolderOrder(order: string[]): Promise<Result<void>> {
   return call('PUT', '/api/folder-order', { order });
+}
+
+export interface DraftAttachment {
+  folder?: string;
+  uid?: number;
+  part?: string;
+  name: string;
+  type: string;
+  size: number;
+}
+
+export interface Draft {
+  uid?: number;
+  from: Person;
+  to: Person[];
+  cc: Person[];
+  bcc: Person[];
+  subject: string;
+  text: string;
+  html?: string;
+  messageId?: string;
+  inReplyTo?: string;
+  references?: string[];
+  attachments: DraftAttachment[];
+}
+
+export interface ComposerView {
+  draft: Draft;
+  identities: Person[];
+  sizeLimit: number;
+}
+
+export type ComposeMode = 'new' | 'reply' | 'replyAll' | 'forward' | 'draft';
+
+export function composer(mode: ComposeMode, folder?: string, uid?: number): Promise<Result<ComposerView>> {
+  const query = new URLSearchParams({ mode });
+  if (folder) query.set('folder', folder);
+  if (uid) query.set('uid', String(uid));
+  return call('GET', `/api/compose?${query}`);
+}
+
+export function saveDraft(draft: Draft): Promise<Result<{ folder: string; uid: number; messageId: string }>> {
+  return call('POST', '/api/drafts', draft);
+}
+
+export function discardDraft(uid: number): Promise<Result<void>> {
+  return call('POST', '/api/drafts/discard', { uid });
+}
+
+export function send(draft: Draft): Promise<Result<{ id: string; folder: string; uid: number }>> {
+  return call('POST', '/api/send', draft);
+}
+
+export function undoSend(id: string): Promise<Result<{ folder: string; uid: number }>> {
+  return call('POST', '/api/send/undo', { id });
+}
+
+export type SendState = 'waiting' | 'submitting' | 'sent' | 'sent_no_copy' | 'failed' | 'unsent' | 'unknown';
+
+export interface SendStatus {
+  id: string;
+  draftsFolder: string;
+  draftUid: number;
+  state: SendState;
+  error?: string;
+}
+
+export function sendStatus(id: string): Promise<Result<SendStatus>> {
+  return call('GET', `/api/send?${new URLSearchParams({ id })}`);
+}
+
+export async function notices(): Promise<Result<SendStatus[]>> {
+  const result = await call<{ notices: SendStatus[] }>('GET', '/api/notices');
+  return result.ok ? { ok: true, value: result.value.notices } : result;
+}
+
+export function dismissNotice(id: string): Promise<Result<void>> {
+  return call('POST', '/api/notices/dismiss', { id });
 }

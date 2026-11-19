@@ -17,6 +17,7 @@ import (
 	"github.com/kspears/postbox/internal/clock"
 	"github.com/kspears/postbox/internal/config"
 	"github.com/kspears/postbox/internal/mail"
+	"github.com/kspears/postbox/internal/outbox"
 	"github.com/kspears/postbox/internal/session"
 	"github.com/kspears/postbox/internal/store"
 	"github.com/kspears/postbox/web"
@@ -46,6 +47,10 @@ func serve() error {
 	if err != nil {
 		return err
 	}
+	submit, err := mail.NewSubmitter(cfg.SMTPAddr, server)
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(cfg.State, 0o700); err != nil {
 		return fmt.Errorf("POSTBOX_STATE: %w", err)
 	}
@@ -59,6 +64,11 @@ func serve() error {
 
 	clk := &clock.Clock{}
 	sessions := session.NewManager(st, clk, cfg.PublicURL.Scheme == "https")
+	pool := mail.NewPool(ctx, server, clk.Now)
+	out, err := outbox.New(ctx, st, pool, submit)
+	if err != nil {
+		return fmt.Errorf("POSTBOX_STATE: %w", err)
+	}
 
 	ln, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
@@ -68,7 +78,9 @@ func serve() error {
 		Handler: api.NewHandler(web.Dist(), api.Deps{
 			Sessions:       sessions,
 			Auth:           auth.New(st, clk, server),
-			Mail:           mail.NewPool(ctx, server, clk.Now),
+			Mail:           pool,
+			Submit:         submit,
+			Outbox:         out,
 			Store:          st,
 			Watch:          mail.NewWatcher(server),
 			Stopping:       ctx,
