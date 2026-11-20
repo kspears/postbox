@@ -852,6 +852,7 @@
 
   <div class="panes" data-view={view}>
     <FolderList
+      account={account.account}
       folders={folderList}
       current={route.folder}
       onOpen={(name) => {
