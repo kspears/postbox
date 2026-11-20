@@ -197,14 +197,14 @@
                 aria-current={folder.name === current ? 'page' : undefined}
                 onclick={() => onOpen(folder.name)}
               >
+                <span class="label">{folder.label}</span>
+                {#if folder.unread > 0}
+                  <span class="count" aria-label={strings.folders.unread(folder.unread)}>{folder.unread}</span>
+                {/if}
                 {#if folder.role}
                   <svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <path d={folderIcons[folder.role]} />
                   </svg>
-                {/if}
-                <span class="label">{folder.label}</span>
-                {#if folder.unread > 0}
-                  <span class="count" aria-label={strings.folders.unread(folder.unread)}>{folder.unread}</span>
                 {/if}
               </button>
             {:else}
@@ -338,6 +338,7 @@
   }
 
   .icon {
+    order: -1;
     flex: none;
     width: 1rem;
     height: 1rem;
