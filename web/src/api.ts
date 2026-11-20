@@ -408,7 +408,7 @@ function fromBase64url(s: string): Uint8Array<ArrayBuffer> {
 }
 
 function toBase64url(bytes: ArrayBuffer | ArrayBufferView): string {
-  const view = bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const view = ArrayBuffer.isView(bytes) ? new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength) : new Uint8Array(bytes);
   return btoa(String.fromCharCode(...view)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
@@ -457,9 +457,15 @@ function credentialJSON(c: PublicKeyCredential): unknown {
   return { id: c.id, rawId: toBase64url(c.rawId), type: c.type, authenticatorAttachment: c.authenticatorAttachment, response, clientExtensionResults: {} };
 }
 
+// The PRF output, or '' for none. Anything but the 32 bytes the spec gives counts as none, so a
+// provider that answers out of spec falls back to the server's key rather than failing.
 function prfOutput(c: PublicKeyCredential): string {
-  const first = c.getClientExtensionResults().prf?.results?.first;
-  return first ? toBase64url(first) : '';
+  const first: unknown = c.getClientExtensionResults().prf?.results?.first;
+  // By tag, not instanceof: an extension may hand back a buffer from its own realm.
+  const buffer = Object.prototype.toString.call(first) === '[object ArrayBuffer]';
+  if (!buffer && !ArrayBuffer.isView(first)) return '';
+  const bytes = first as ArrayBuffer | ArrayBufferView;
+  return bytes.byteLength === 32 ? toBase64url(bytes) : '';
 }
 
 /** The person closed the browser's passkey prompt, or it timed out. */
@@ -482,8 +488,8 @@ export interface NewPasskey {
   rawId: ArrayBuffer;
   salt?: string;
   prf: string;
-  // The provider said it supports PRF. One that does not (1Password, Bitwarden) is saved
-  // without, and the server locks its password instead.
+  // The provider said it supports PRF. One that does not, or says so and then gives no output,
+  // is saved without, and the server locks its password instead.
   prfEnabled: boolean;
 }
 

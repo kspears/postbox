@@ -36,6 +36,35 @@ test('a passkey without PRF signs in through the server key', async ({ page }) =
   await expectInbox(page);
 });
 
+// As 1Password's extension does (FS-5593): PRF reported as enabled, then no output, or output out
+// of spec. Either way the passkey is kept, locked by the server's key.
+for (const { account, output } of [
+  { account: 'halfprf', output: 'none' },
+  { account: 'badprf', output: '16 bytes' },
+] as const) {
+  test(`a passkey that claims PRF and gives ${output} falls back to the server key`, async ({ page }) => {
+    await addAuthenticator(page);
+    await page.addInitScript((malformed: boolean) => {
+      const original = PublicKeyCredential.prototype.getClientExtensionResults;
+      PublicKeyCredential.prototype.getClientExtensionResults = function () {
+        const results = original.call(this);
+        if (!results.prf) return results;
+        (window as unknown as { prfStubbed: boolean }).prfStubbed = true;
+        return { ...results, prf: malformed ? { enabled: true, results: { first: new Uint8Array(16) } } : { enabled: true } };
+      };
+    }, output !== 'none');
+    await signIn(page, `${account}@example.test`, seedPassword());
+    await expectInbox(page);
+    await addPasskey(page);
+    expect(await page.evaluate(() => (window as unknown as { prfStubbed?: boolean }).prfStubbed)).toBe(true);
+    await closeSettings(page);
+    await signOut(page);
+
+    await page.getByRole('button', { name: 'Sign in with a passkey' }).click();
+    await expectInbox(page);
+  });
+}
+
 test('removing the last passkey turns "Require passkey" off', async ({ page }) => {
   await addAuthenticator(page);
   await signIn(page, 'remover@example.test', seedPassword());

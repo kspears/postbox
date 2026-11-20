@@ -130,11 +130,12 @@
       const used = await unlockNewPasskey(unfinished).catch(() => null);
       if (used === cancelled) return;
       unfinished = null;
-      // A provider that says it has PRF must give the key: never let it fall back to the server's.
-      if (used === null || !used.prf) {
-        passkeyProblem = used === null ? strings.settings.passkeyFailed : strings.settings.passkeyUnsupported;
+      if (used === null) {
+        passkeyProblem = strings.settings.passkeyFailed;
         return;
       }
+      // Some providers say they have PRF and then give no usable output (1Password's extension,
+      // FS-5593). Saved without it, the server's key locks the password instead.
       await keep(used);
     } finally {
       working = false;

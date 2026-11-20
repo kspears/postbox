@@ -78,7 +78,8 @@ an operator who deploys the container and runs its CLI.
 1. In Settings, a signed-in user chooses "Add a passkey" and completes the browser prompt.
    Postbox prefers a passkey that supports the WebAuthn PRF extension, which is known only after
    the prompt. A passkey without it (1Password and Bitwarden, for example) is accepted when the
-   operator has set `POSTBOX_PASSKEY_KEY`. When neither holds, nothing is saved and the user
+   operator has set `POSTBOX_PASSKEY_KEY`. So is one whose provider reports PRF but then gives
+   no output, or output that is not 32 bytes. When neither holds, nothing is saved and the user
    sees "This passkey can't be used with Postbox. Try a different passkey provider."
 2. From then on, "Sign in with a passkey" signs them in with that passkey, on any device where
    it is available, without typing a password.
@@ -589,6 +590,7 @@ performance panel, median of five tries.
 | Sign-in | Password, plus passkeys in v1 | Secure from the first release | user |
 | Second factor | "Require passkey" switch; no authenticator codes | Less to build than codes; guards Postbox only, stated in the UI | agent default |
 | Passkeys without PRF | Accepted when `POSTBOX_PASSKEY_KEY` is set, with the password encrypted under a key derived from it; refused otherwise | 1Password and Bitwarden must work as passkey providers. The database alone still reveals nothing; the database and the server's configuration together reveal those passwords | user |
+| PRF claimed but not given | Treated as a passkey without PRF, not refused | 1Password's extension reports PRF and returns out-of-spec output (its FS-5593); refusing made it unusable. Such a passkey gets the server key's protection, not PRF's | user |
 | Enrolment with a provider that reports no PRF support | Saved straight away under the server key, with no second prompt | Asking again cannot produce a key such a provider lacks | agent default |
 | Removing a passkey, or `postbox passkeys clear` | Also ends the account's passkey sessions, other than the one that asked | A passkey is removed because it was lost; its sessions should not outlive it. Sessions do not record which passkey started them, so all passkey sessions go | agent default |
 | Failed sign-ins with a passkey Postbox does not know | Count against that passkey and the client IP's limit, not an account | One removed passkey retried must not block every passkey sign-in from the address | agent default |
