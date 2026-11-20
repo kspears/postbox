@@ -20,13 +20,14 @@ the variable when a required one is missing or malformed.
 | `POSTBOX_PUBLIC_URL` | yes | The `https://` URL users open, with no path. `http://` is accepted only for `localhost` and names under `.localhost`. |
 | `POSTBOX_STATE` | no | State directory. Default `/data/postbox`. |
 | `POSTBOX_LISTEN` | no | HTTP listen address. Default `:8080`. |
-| `POSTBOX_CLIENT_IP_HEADER` | no | Request header that carries the real client IP, set by the reverse proxy. |
+| `POSTBOX_CLIENT_IP_HEADER` | no | Request header that carries the real client IP, set by the reverse proxy. Requires `POSTBOX_TRUSTED_PROXY`. |
+| `POSTBOX_TRUSTED_PROXY` | with the header | The reverse proxy's IP address (one address, not a network). The header is believed only on connections from it. |
 | `POSTBOX_CA_FILE` | no | PEM file of extra certificate authorities trusted for the mail server. |
 | `POSTBOX_PASSKEY_KEY` | no | 32 random bytes in base64 (`openssl rand -base64 32`). Lets passkeys without the PRF extension (1Password, Bitwarden) sign in by encrypting their stored passwords with it. Keep it secret and apart from the state directory; changing it breaks those passkeys until they are added again. |
 
 Postbox speaks plain HTTP; put a reverse proxy that terminates TLS in front of it. When
-`POSTBOX_CLIENT_IP_HEADER` is set, the header is trusted from every request, so the listen port
-must be reachable only through that proxy.
+`POSTBOX_CLIENT_IP_HEADER` is set, the header is believed only on connections from
+`POSTBOX_TRUSTED_PROXY`; from any other peer Postbox uses the connection's own address.
 
 `GET /healthz` returns `200` with the body `ok` while the process is up.
 
@@ -46,6 +47,7 @@ services:
       POSTBOX_SMTP_ADDR: mail.example.com:465
       POSTBOX_PUBLIC_URL: https://webmail.example.com
       POSTBOX_CLIENT_IP_HEADER: X-Forwarded-For
+      POSTBOX_TRUSTED_PROXY: 172.20.0.2   # the proxy's fixed address on the shared network
       POSTBOX_PASSKEY_KEY: ${POSTBOX_PASSKEY_KEY}   # optional; see below
     volumes:
       - postbox:/data/postbox
@@ -63,8 +65,9 @@ networks:
 not buffer responses on `/api/events`, which is a stream of server-sent events. Postbox reads
 the client's address from the last entry of the header named by `POSTBOX_CLIENT_IP_HEADER`,
 the one the proxy nearest Postbox adds; behind a CDN, have that proxy set the header to the real
-address. Postbox trusts the header from anything that can reach it, so only the proxy may: a
-container that reaches port 8080 directly can claim any address, past the sign-in throttle.
+address. Postbox believes the header only from `POSTBOX_TRUSTED_PROXY`, so give the proxy a
+fixed address on the shared network (Postbox will not start with the header set and no proxy
+address); a container that reaches port 8080 directly is then counted at its own address.
 
 **The mail server** needs IMAP over implicit TLS (port 993, not STARTTLS on 143) and
 submission over implicit TLS on 465 or STARTTLS on another port, with a certificate Postbox

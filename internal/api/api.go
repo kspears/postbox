@@ -6,6 +6,7 @@ import (
 	"context"
 	"io/fs"
 	"net/http"
+	"net/netip"
 	"strings"
 
 	"github.com/kspears/postbox/internal/addressbook"
@@ -35,6 +36,8 @@ type Deps struct {
 	Origin string
 	// ClientIPHeader, when set, names the reverse proxy's header with the person's address.
 	ClientIPHeader string
+	// TrustedProxy is the one peer whose ClientIPHeader is believed.
+	TrustedProxy netip.Addr
 }
 
 // NewHandler serves the frontend in dist and the endpoints beside it.

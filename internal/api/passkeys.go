@@ -183,7 +183,7 @@ func (a *apiHandler) requirePasskey(w http.ResponseWriter, r *http.Request, s *s
 // passkeySignInOptions answers POST /api/passkey-session/options: what "Sign in with a passkey"
 // gives get().
 func (a *apiHandler) passkeySignInOptions(w http.ResponseWriter, r *http.Request) {
-	nonce, options, err := a.Auth.SignInOptions()
+	nonce, options, err := a.Auth.SignInOptions(a.clientIP(r))
 	if a.ceremonyFailed(w, r, err) {
 		return
 	}
@@ -214,6 +214,8 @@ func (a *apiHandler) ceremonyFailed(w http.ResponseWriter, r *http.Request, err 
 	switch {
 	case err == nil:
 		return false
+	case errors.Is(err, auth.ErrVisitorBusy):
+		writeError(w, http.StatusTooManyRequests, errThrottled)
 	case errors.Is(err, auth.ErrBusy):
 		writeError(w, http.StatusServiceUnavailable, errInternal)
 	default:

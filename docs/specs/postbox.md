@@ -266,15 +266,16 @@ All new. Environment variables:
 | `POSTBOX_PUBLIC_URL` | yes | The `https://` URL users open, with no path. Passkeys and cookies are bound to it. `http://` is accepted only when the host is `localhost` or ends in `.localhost`. |
 | `POSTBOX_STATE` | no | State directory holding `postbox.db`. Default `/data/postbox`. |
 | `POSTBOX_LISTEN` | no | HTTP listen address. Default `:8080`. |
-| `POSTBOX_CLIENT_IP_HEADER` | no | Request header that carries the real client IP, set by the reverse proxy. Unset means the connection's remote address is used. |
+| `POSTBOX_CLIENT_IP_HEADER` | no | Request header that carries the real client IP, set by the reverse proxy. Unset means the connection's remote address is used. Requires `POSTBOX_TRUSTED_PROXY`. |
+| `POSTBOX_TRUSTED_PROXY` | with the header | The reverse proxy's IP address (one address, not a network). The header is believed only on connections from it; others are counted at their own address. |
 | `POSTBOX_CA_FILE` | no | PEM file of extra certificate authorities trusted for the mail server. |
 | `POSTBOX_PASSKEY_KEY` | no | 32 random bytes in base64 (`openssl rand -base64 32`). Lets passkeys without PRF (1Password, Bitwarden) sign in; their stored passwords are encrypted with it. Changing it breaks those passkeys until they are added again. |
 
 Postbox exits at startup with an error naming the variable when a required one is missing or
 malformed, for example `error: POSTBOX_IMAP_ADDR is required (host:port)`.
 
-When `POSTBOX_CLIENT_IP_HEADER` is set, the header is trusted from every request, so the
-listen port must be reachable only through the reverse proxy. The README states this.
+`POSTBOX_CLIENT_IP_HEADER` without `POSTBOX_TRUSTED_PROXY` is a start-up error; the header is
+believed only on connections from the trusted proxy. The README states this.
 
 ### Commands and endpoints
 

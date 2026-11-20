@@ -121,6 +121,7 @@ func serve() error {
 			Clock:          clk,
 			Origin:         cfg.PublicURL.String(),
 			ClientIPHeader: cfg.ClientIPHeader,
+			TrustedProxy:   cfg.TrustedProxy,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,

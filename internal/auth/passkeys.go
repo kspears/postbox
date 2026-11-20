@@ -59,8 +59,15 @@ const (
 // maxCeremonies bounds the ceremonies held at once: sign-in ones can be started by anyone.
 const maxCeremonies = 10_000
 
+// maxCeremoniesPerVisitor bounds the open sign-in ceremonies one visitor may hold, so one client
+// cannot use up the room for everyone else.
+const maxCeremoniesPerVisitor = 20
+
 // ErrBusy means too many passkey ceremonies are under way; try again shortly.
 var ErrBusy = errors.New("too many passkey ceremonies")
+
+// ErrVisitorBusy means this visitor already holds as many open sign-in ceremonies as it may.
+var ErrVisitorBusy = errors.New("too many passkey ceremonies from this address")
 
 // What a ceremony is for. A nonce finishes only a ceremony of its own kind.
 type ceremonyKind int
@@ -77,6 +84,8 @@ type ceremony struct {
 	expires time.Time
 	data    webauthn.SessionData
 	account string
+	// A sign-in: the throttle key of the visitor who started it. Empty when not counted per visitor.
+	visitor string
 	// Enrolment: the account's user handle.
 	handle []byte
 	// A sign-in waiting for a new password: the passkey and the key its password is sealed with.
@@ -95,15 +104,21 @@ func (c *ceremonies) put(now time.Time, cer ceremony) (string, error) {
 	if c.byID == nil {
 		c.byID = map[string]ceremony{}
 	}
+	open := 0
+	for id, old := range c.byID {
+		if !now.Before(old.expires) {
+			delete(c.byID, id)
+			continue
+		}
+		if cer.visitor != "" && old.visitor == cer.visitor {
+			open++
+		}
+	}
+	if open >= maxCeremoniesPerVisitor {
+		return "", ErrVisitorBusy
+	}
 	if len(c.byID) >= maxCeremonies {
-		for id, old := range c.byID {
-			if !now.Before(old.expires) {
-				delete(c.byID, id)
-			}
-		}
-		if len(c.byID) >= maxCeremonies {
-			return "", ErrBusy
-		}
+		return "", ErrBusy
 	}
 	nonce := rand.Text()
 	cer.expires = now.Add(ceremonyLife)
@@ -251,8 +266,9 @@ func (a *Authenticator) Enrol(ctx context.Context, account, password, nonce stri
 }
 
 // SignInOptions starts a passkey sign-in: what the browser's get() is given, and the nonce
-// that finishes it. No account is named; the passkey says whose it is.
-func (a *Authenticator) SignInOptions() (string, *protocol.CredentialAssertion, error) {
+// that finishes it. No account is named; the passkey says whose it is. The ceremony counts
+// against clientIP's share of the open ones.
+func (a *Authenticator) SignInOptions(clientIP netip.Addr) (string, *protocol.CredentialAssertion, error) {
 	options, data, err := a.webauthn.BeginDiscoverableLogin(
 		webauthn.WithUserVerification(protocol.VerificationRequired),
 		webauthn.WithAssertionExtensions(webauthn.WithExtensionPRF(protocol.PRFValues{First: prfSalt})),
@@ -260,7 +276,7 @@ func (a *Authenticator) SignInOptions() (string, *protocol.CredentialAssertion, 
 	if err != nil {
 		return "", nil, err
 	}
-	nonce, err := a.pending.put(a.clock.Now(), ceremony{kind: signIn, data: *data})
+	nonce, err := a.pending.put(a.clock.Now(), ceremony{kind: signIn, data: *data, visitor: throttleKey(clientIP)})
 	return nonce, options, err
 }
 

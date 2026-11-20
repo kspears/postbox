@@ -54,6 +54,38 @@ func TestCeremonies(t *testing.T) {
 	}
 }
 
+func TestCeremoniesPerVisitor(t *testing.T) {
+	var c ceremonies
+	now := time.Unix(1_800_000_000, 0)
+	for range maxCeremoniesPerVisitor {
+		if _, err := c.put(now, ceremony{kind: signIn, visitor: "a"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := c.put(now, ceremony{kind: signIn, visitor: "a"}); !errors.Is(err, ErrVisitorBusy) {
+		t.Errorf("over the cap: %v", err)
+	}
+	if _, err := c.put(now, ceremony{kind: signIn, visitor: "b"}); err != nil {
+		t.Errorf("another visitor: %v", err)
+	}
+	if _, err := c.put(now, ceremony{kind: enrolment}); err != nil {
+		t.Errorf("uncounted: %v", err)
+	}
+}
+
+func TestCeremoniesPurgeExpiredWhenNotFull(t *testing.T) {
+	var c ceremonies
+	now := time.Unix(1_800_000_000, 0)
+	for range 3 {
+		if _, err := c.put(now, ceremony{kind: signIn}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := c.put(now.Add(ceremonyLife), ceremony{kind: signIn}); err != nil || len(c.byID) != 1 {
+		t.Errorf("after expiry: %v, %d held", err, len(c.byID))
+	}
+}
+
 func TestLockKey(t *testing.T) {
 	a := &Authenticator{}
 	prf := make([]byte, 32)
@@ -122,7 +154,7 @@ func TestNewPassword(t *testing.T) {
 
 func TestSignInOptions(t *testing.T) {
 	a, _, _ := newFakeAuth(t)
-	nonce, options, err := a.SignInOptions()
+	nonce, options, err := a.SignInOptions(client)
 	if err != nil || nonce == "" {
 		t.Fatal(err)
 	}
@@ -181,7 +213,7 @@ func TestUnknownPasskeysDoNotBlockTheIP(t *testing.T) {
 	a, _, _ := newFakeAuth(t)
 	ctx := context.Background()
 	for range maxPerAccountIP {
-		nonce, _, err := a.SignInOptions()
+		nonce, _, err := a.SignInOptions(client)
 		if err != nil {
 			t.Fatal(err)
 		}

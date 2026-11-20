@@ -55,6 +55,7 @@ func newDeps(t *testing.T) Deps {
 		Clock:          clk,
 		Origin:         origin,
 		ClientIPHeader: "X-Real-IP",
+		TrustedProxy:   netip.MustParseAddr("192.0.2.1"), // httptest's default peer
 	}
 }
 
@@ -153,7 +154,7 @@ func TestSecurityHeaders(t *testing.T) {
 }
 
 func TestClientIP(t *testing.T) {
-	a := &apiHandler{Deps: Deps{ClientIPHeader: "X-Forwarded-For"}}
+	a := &apiHandler{Deps: Deps{ClientIPHeader: "X-Forwarded-For", TrustedProxy: netip.MustParseAddr("192.0.2.1")}}
 	tests := []struct {
 		header []string
 		remote string
@@ -166,6 +167,8 @@ func TestClientIP(t *testing.T) {
 		{[]string{"garbage"}, "192.0.2.1:5000", "192.0.2.1"},
 		{[]string{"::ffff:203.0.113.9"}, "192.0.2.1:5000", "203.0.113.9"},
 		{nil, "[2001:db8::1]:5000", "2001:db8::1"},
+		// Only the trusted proxy's header is believed.
+		{[]string{"203.0.113.9"}, "192.0.2.99:5000", "192.0.2.99"},
 		// A zone can hold any text, quotes included; it must never reach the mail server.
 		{[]string{`fe80::1%x" "x-forward-user" "admin`}, "192.0.2.1:5000", "fe80::1"},
 	}
