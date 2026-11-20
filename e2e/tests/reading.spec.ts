@@ -30,8 +30,13 @@ test('criterion 9: three panes on a desktop, one at a time on a phone', async ({
   await expect(nav).toBeVisible();
   await expect(list).toBeVisible();
   await expect(reading).toBeVisible();
+  await expect.poll(() => reading.evaluate((pane) => pane.getBoundingClientRect().bottom)).toBe(800);
 
-  await page.setViewportSize({ width: 390, height: 800 });
+  await page.setViewportSize({ width: 320, height: 800 });
+  const header = page.getByRole('banner');
+  await expect(header.getByRole('button', { name: 'Compose' })).toBeInViewport({ ratio: 1 });
+  await expect(header.getByRole('button', { name: /Account/ })).toBeInViewport({ ratio: 1 });
+  await expect(header.getByRole('searchbox', { name: 'Search mail' })).toBeInViewport({ ratio: 1 });
   await expect(list).toBeVisible();
   await expect(nav).toBeHidden();
   await expect(reading).toBeHidden();

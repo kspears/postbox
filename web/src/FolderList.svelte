@@ -5,10 +5,19 @@
 </script>
 
 <script lang="ts">
-  import type { ErrorCode, Folder } from './api';
+  import type { ErrorCode, Folder, Role } from './api';
   import { strings } from './strings';
 
   type Zone = 'before' | 'into' | 'after';
+
+  const folderIcons: Record<Role, string> = {
+    inbox: 'M2 9l2-5h8l2 5v4H2z M2 9h3l1 2h4l1-2h3',
+    drafts: 'M4 2h5l3 3v9H4z M9 2v3h3 M6 8h4 M6 11h4',
+    sent: 'M2 7l12-5-5 12-2-5z M7 9l7-7',
+    archive: 'M2 3h12v3H2z M3 6v7h10V6 M6 9h4',
+    junk: 'M8 2l5 2v4c0 2-2 4-5 6-3-2-5-4-5-6V4z M8 5v3 M8 10v.1',
+    trash: 'M2 4h12 M6 4V2h4v2 M4 4l1 9h6l1-9 M7 6v5 M9 6v5',
+  };
 
   interface Props {
     folders: Folder[];
@@ -192,6 +201,11 @@
                 {#if folder.unread > 0}
                   <span class="count" aria-label={strings.folders.unread(folder.unread)}>{folder.unread}</span>
                 {/if}
+                {#if folder.role}
+                  <svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d={folderIcons[folder.role]} />
+                  </svg>
+                {/if}
               </button>
             {:else}
               <span class="holder">{folder.label}</span>
@@ -257,8 +271,9 @@
 
 <style>
   nav {
-    padding: 0.5rem;
+    padding: 0.75rem 0.5rem;
     overflow-y: auto;
+    background: var(--rail);
   }
 
   ul {
@@ -320,6 +335,18 @@
   .open.current {
     background: var(--selected);
     font-weight: 600;
+  }
+
+  .icon {
+    order: -1;
+    flex: none;
+    width: 1rem;
+    height: 1rem;
+    color: var(--text-muted);
+  }
+
+  .current .icon {
+    color: var(--accent);
   }
 
   .holder {
