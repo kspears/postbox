@@ -309,6 +309,8 @@ export interface ComposerView {
 export interface Passkey {
   id: string;
   added: string;
+  // How its stored password is locked: by its own PRF output, or by the server's key.
+  lock: 'prf' | 'server';
 }
 
 export function settings(): Promise<Result<{ preferences: Preferences; identities: Identity[] }>> {

@@ -61,6 +61,8 @@ export const strings = {
     passkeys: 'Passkeys',
     addPasskey: 'Add a passkey',
     passkeyAdded: (date: string) => `Added ${date}`,
+    // A passkey without PRF output: its stored password is locked by POSTBOX_PASSKEY_KEY.
+    passkeyServerLock: "Protected by the server's key, not the passkey",
     removePasskey: (date: string) => `Remove the passkey added ${date}`,
     finishPasskey: 'Use the new passkey once more to finish adding it.',
     finish: 'Finish',

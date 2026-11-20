@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { addAuthenticator, addPasskey, expectInbox, fromIP, seedPassword, setMailPassword, signIn, signOut } from '../helpers';
+import { addAuthenticator, addPasskey, expectInbox, fromIP, openSettings, seedPassword, setMailPassword, signIn, signOut } from '../helpers';
 
 // Milestone 9: passkeys, with Chromium's virtual authenticator as the passkey provider.
 test.use(fromIP('203.0.113.150'));
@@ -12,7 +12,8 @@ test('criterion 3: a passkey added in Settings signs in without a password', asy
   await addAuthenticator(page);
   await signIn(page, 'keyholder@example.test', seedPassword());
   await expectInbox(page);
-  await addPasskey(page);
+  const settings = await addPasskey(page);
+  await expect(settings.getByText("Protected by the server's key")).toHaveCount(0);
   await closeSettings(page);
   await signOut(page);
 
@@ -28,7 +29,11 @@ test('a passkey without PRF signs in through the server key', async ({ page }) =
   await addAuthenticator(page, false);
   await signIn(page, 'plainkey@example.test', seedPassword());
   await expectInbox(page);
-  await addPasskey(page);
+  const settings = await addPasskey(page);
+  // Says so in Settings, and still after Settings is opened again.
+  await expect(settings.getByText("Protected by the server's key, not the passkey")).toBeVisible();
+  await closeSettings(page);
+  await expect((await openSettings(page)).getByText("Protected by the server's key, not the passkey")).toBeVisible();
   await closeSettings(page);
   await signOut(page);
 

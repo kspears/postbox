@@ -64,10 +64,16 @@ func (a *apiHandler) confirmPassword(w http.ResponseWriter, r *http.Request, s *
 	writeJSON(w, http.StatusOK, map[string]string{"confirm": token})
 }
 
-// passkeyView is a passkey as Settings lists it.
+// passkeyView is a passkey as Settings lists it. Lock is store.LockPRF or store.LockServer, so
+// a passkey that fell back to the server's key is visible as one.
 type passkeyView struct {
 	ID    protocol.URLEncodedBase64 `json:"id"`
 	Added time.Time                 `json:"added"`
+	Lock  string                    `json:"lock"`
+}
+
+func viewOf(p store.Passkey) passkeyView {
+	return passkeyView{ID: p.ID, Added: p.CreatedAt, Lock: p.Lock}
 }
 
 // passkeyAnswer is the browser's answer to create() or get(), with the PRF output taken out of
@@ -92,7 +98,7 @@ func (a *apiHandler) passkeys(w http.ResponseWriter, r *http.Request, s *session
 	}
 	list := make([]passkeyView, len(keys))
 	for i, k := range keys {
-		list[i] = passkeyView{ID: k.ID, Added: k.CreatedAt}
+		list[i] = viewOf(k)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"passkeys": list, "requirePasskey": required})
 }
@@ -127,7 +133,10 @@ func (a *apiHandler) addPasskey(w http.ResponseWriter, r *http.Request, s *sessi
 	case err != nil:
 		internalError(w, r, err)
 	default:
-		writeJSON(w, http.StatusCreated, passkeyView{ID: p.ID, Added: p.CreatedAt})
+		if p.Lock == store.LockServer {
+			log.Printf("add passkey: %s's new passkey gave no PRF output; the server's key locks its password", s.Account)
+		}
+		writeJSON(w, http.StatusCreated, viewOf(p))
 	}
 }
 

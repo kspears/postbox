@@ -83,7 +83,9 @@ an operator who deploys the container and runs its CLI.
    sees "This passkey can't be used with Postbox. Try a different passkey provider."
 2. From then on, "Sign in with a passkey" signs them in with that passkey, on any device where
    it is available, without typing a password.
-3. Settings lists the account's passkeys with the date each was added and a "Remove" action.
+3. Settings lists the account's passkeys with the date each was added and a "Remove" action. A
+   passkey locked by `POSTBOX_PASSKEY_KEY` says "Protected by the server's key, not the
+   passkey", and adding one is logged.
 4. Settings has a "Require passkey" switch with the note "This protects Postbox only. Your
    password still works in other mail apps." It can be turned on only when the account has at
    least one passkey. While it is on, password sign-in to Postbox is refused for that account.
