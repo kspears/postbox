@@ -13,13 +13,17 @@ updates:
       go:
         update-types: [minor, patch]
 
-  # The app's frontend and the browser tests.
+  # The app's frontend and the browser tests. @playwright/test and the Playwright image in
+  # e2e/Dockerfile must be the same release, and no one PR can move both, so both are left to
+  # a hand-made change.
   - package-ecosystem: npm
     directories: [/web, /e2e]
     schedule:
       interval: weekly
     cooldown:
       default-days: 7
+    ignore:
+      - dependency-name: "@playwright/test"
     groups:
       npm:
         update-types: [minor, patch]
@@ -31,9 +35,11 @@ updates:
       interval: weekly
     cooldown:
       default-days: 7
+    ignore:
+      - dependency-name: "mcr.microsoft.com/playwright"
     groups:
       base-images:
-        patterns: ["*"]
+        update-types: [minor, patch]
 
   - package-ecosystem: github-actions
     directory: /
@@ -43,4 +49,4 @@ updates:
       default-days: 7
     groups:
       actions:
-        patterns: ["*"]
+        update-types: [minor, patch]
