@@ -96,8 +96,8 @@ test('criterion 17: two selected conversations dragged to a folder, Move to…, 
   await expect.poll(() => subjectsIn(organiser, 'Receipts')).toEqual(expect.arrayContaining(['Move one', 'Move two']));
 
   // The middle of a folder nests the dragged one inside it.
-  const target = page.getByRole('navigation', { name: 'Folders' }).getByRole('listitem').filter({ hasText: /^Projects/ });
-  await page.getByRole('navigation', { name: 'Folders' }).getByRole('listitem').filter({ hasText: /^Old/ }).dragTo(target);
+  const target = page.getByRole('navigation', { name: 'Folders' }).getByRole('listitem').filter({ has: page.getByRole('button', { name: /^Projects/ }) });
+  await page.getByRole('navigation', { name: 'Folders' }).getByRole('listitem').filter({ has: page.getByRole('button', { name: /^Old/ }) }).dragTo(target);
   await expect.poll(() => foldersOf(organiser)).toContain('Projects/Old');
 
   // The same without dragging: "Move folder…" from the folder's menu.
@@ -182,8 +182,8 @@ test('criterion 18: folders are created, renamed, deleted and reordered from the
   await imap(organiser, ['CREATE "Alpha"', 'CREATE "Zebra"']);
   await page.reload();
   const items = nav.getByRole('listitem');
-  const alpha = items.filter({ hasText: /^Alpha/ });
-  await items.filter({ hasText: /^Zebra/ }).dragTo(alpha, { targetPosition: { x: 20, y: 2 } });
+  const alpha = items.filter({ has: page.getByRole('button', { name: /^Alpha/ }) });
+  await items.filter({ has: page.getByRole('button', { name: /^Zebra/ }) }).dragTo(alpha, { targetPosition: { x: 20, y: 2 } });
   const labels = async () => (await nav.getByRole('button').allInnerTexts()).map((t) => t.split('\n')[0]!.trim());
   await expect.poll(async () => { const l = await labels(); return l.indexOf('Zebra') < l.indexOf('Alpha'); }).toBe(true);
 

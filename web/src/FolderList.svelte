@@ -116,13 +116,26 @@
     return folders.reduce((n, f) => (within(f, folder) ? n + f.unread : n), 0);
   }
 
-  // Opening a folder reveals it. Only when the open folder changes, so collapsing its parent
-  // afterwards sticks through folder reloads.
-  const currentParent = $derived(byName.get(current)?.parent);
+  // Opening a folder reveals it: when the open folder changes, or first appears in the list.
+  // Not on every folder reload, so collapsing its parent afterwards sticks.
+  const opened = $derived(byName.has(current) ? current : '');
   $effect(() => {
-    const first = currentParent;
+    const name = opened;
     untrack(() => {
-      for (let p = first, d = 0; p && d < folders.length; p = byName.get(p)?.parent, d++) setExpanded(p, true);
+      for (let p = byName.get(name)?.parent, d = 0; p && d < folders.length; p = byName.get(p)?.parent, d++) {
+        setExpanded(p, true);
+      }
+    });
+  });
+
+  // Folders deleted, renamed or moved elsewhere are forgotten once a list without them loads.
+  $effect(() => {
+    if (folders.length === 0) return;
+    const names = byName;
+    untrack(() => {
+      const stale = [...expanded].filter((n) => !names.has(n));
+      for (const n of stale) expanded.delete(n);
+      if (stale.length) saveExpanded();
     });
   });
 
@@ -216,7 +229,11 @@
       }
       return;
     }
-    if (dragFolder) onMoveFolder(dragFolder, target, zone);
+    if (dragFolder) {
+      // So the folder dropped in stays in view.
+      if (zone === 'into') setExpanded(target.name, true);
+      onMoveFolder(dragFolder, target, zone);
+    }
     dragFolder = null;
   }
 
@@ -260,29 +277,8 @@
             {#if editError}<p class="error" role="alert">{editError}</p>{/if}
           </form>
         {:else}
+          {@const unread = unreadShown(folder)}
           <div class="row">
-            {#if folder.selectable}
-              <button
-                type="button"
-                class="open"
-                class:current={folder.name === current}
-                aria-current={folder.name === current ? 'page' : undefined}
-                onclick={() => onOpen(folder.name)}
-              >
-                <span class="label">{folder.label}</span>
-                {#if unreadShown(folder) > 0}
-                  <span class="count" aria-label={strings.folders.unread(unreadShown(folder))}>{unreadShown(folder)}</span>
-                {/if}
-                {#if folder.role}
-                  <svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path d={folderIcons[folder.role]} />
-                  </svg>
-                {/if}
-              </button>
-            {:else}
-              <span class="holder">{folder.label}</span>
-            {/if}
-            <!-- After the label in the DOM, so the row's text starts with the name; shown first by order. -->
             {#if parents.has(folder.name)}
               <button
                 type="button"
@@ -297,6 +293,32 @@
               </button>
             {:else if parents.size > 0}
               <span class="toggle" aria-hidden="true"></span>
+            {/if}
+            {#if folder.selectable}
+              <button
+                type="button"
+                class="open"
+                class:current={folder.name === current}
+                aria-current={folder.name === current ? 'page' : undefined}
+                onclick={() => onOpen(folder.name)}
+              >
+                <span class="label">{folder.label}</span>
+                {#if unread > 0}
+                  <span class="count" aria-label={strings.folders.unread(unread)}>{unread}</span>
+                {/if}
+                {#if folder.role}
+                  <svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d={folderIcons[folder.role]} />
+                  </svg>
+                {/if}
+              </button>
+            {:else}
+              <span class="holder">
+                <span class="label">{folder.label}</span>
+                {#if unread > 0}
+                  <span class="count" aria-label={strings.folders.unread(unread)}>{unread}</span>
+                {/if}
+              </span>
             {/if}
             {#if folder.selectable || !folder.role}
               <button
@@ -442,12 +464,11 @@
   }
 
   .toggle {
-    order: -1;
     flex: none;
     display: grid;
     place-items: center;
-    width: 1.25rem;
-    height: 1.25rem;
+    width: 1.5rem;
+    height: 1.5rem;
     padding: 0;
     border: none;
     border-radius: 0.3rem;
