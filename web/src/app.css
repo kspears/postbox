@@ -1,16 +1,18 @@
 :root {
   color-scheme: light dark;
-  --bg: light-dark(#f6f6f4, #141516);
-  --surface: light-dark(#ffffff, #1e1f21);
+  --bg: light-dark(#f7f6f2, #141923);
+  --surface: light-dark(#fffefa, #1b202a);
+  --rail: light-dark(#f3f1eb, #212733);
   --text: light-dark(#1b1c1e, #ececec);
-  --text-muted: light-dark(#62666d, #9a9da3);
-  --border: light-dark(#dcdcd8, #34363a);
-  --hover: light-dark(#efefec, #2a2c2f);
-  --selected: light-dark(#e3e9fb, #26304d);
-  --accent: light-dark(#2f5bd3, #7b9cff);
+  --text-muted: light-dark(#586578, #a9b4c5);
+  --border: light-dark(#dedfdc, #373f4d);
+  --hover: light-dark(#edeee9, #2a313e);
+  --selected: light-dark(#e9f0fb, #293950);
+  --accent: light-dark(#244f93, #acc8ff);
   /* The accent on a surface of the opposite scheme, as in the undo notice. */
-  --accent-on-dark: light-dark(#9db4ff, #2f5bd3);
-  --on-accent: light-dark(#ffffff, #0d1430);
+  --accent-on-dark: light-dark(#acc8ff, #244f93);
+  --on-accent: light-dark(#ffffff, #101f37);
+  --on-danger: light-dark(#ffffff, #301714);
   --danger: light-dark(#a8261b, #ff9b8f);
   --danger-bg: light-dark(#fdecea, #3a1f1c);
   --shadow: 0 1px 2px light-dark(#0000000f, #00000066), 0 8px 24px light-dark(#0000000d, #00000059);

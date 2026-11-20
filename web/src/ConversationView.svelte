@@ -139,6 +139,7 @@
     min-width: 0;
     overflow-y: auto;
     padding: 0 1.25rem 2rem;
+    background: var(--surface);
   }
 
   .bar {
@@ -146,10 +147,8 @@
     top: 0;
     z-index: 1;
     padding: 0.6rem 0;
-    background: var(--bg);
-  }
-
-  .bar {
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -172,18 +171,17 @@
   }
 
   h2 {
-    margin: 0.25rem 0 1rem;
-    font-size: 1.35rem;
-    font-weight: 650;
-    letter-spacing: -0.01em;
+    margin: 1rem 0;
+    font-size: clamp(1.25rem, 2vw, 1.6rem);
+    font-weight: 700;
+    letter-spacing: -0.025em;
+    overflow-wrap: anywhere;
   }
 
-  article {
-    margin-bottom: 1rem;
-    padding: 1rem;
-    border-radius: 0.75rem;
-    background: var(--surface);
-    box-shadow: var(--shadow);
+  article + article {
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
   }
 
   header {
@@ -213,6 +211,7 @@
 
   .respond {
     display: flex;
+    flex-wrap: wrap;
     gap: 0.4rem;
     margin-top: 0.75rem;
   }

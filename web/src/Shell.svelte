@@ -33,6 +33,7 @@
   import { untrack } from 'svelte';
   import { SvelteMap, SvelteSet } from 'svelte/reactivity';
   import ActionBar, { type Action } from './ActionBar.svelte';
+  import Brand from './Brand.svelte';
   import Composer from './Composer.svelte';
   import ConversationList from './ConversationList.svelte';
   import ConversationView from './ConversationView.svelte';
@@ -763,8 +764,13 @@
 
 <div class="shell">
   <header>
-    <span class="brand">{strings.appName}</span>
-    <button type="button" class="compose" onclick={() => compose('new')}>{strings.compose.compose}</button>
+    <Brand />
+    <button type="button" class="compose" onclick={() => compose('new')}>
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true">
+        <path d="M8 3H4a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V8M7 9l1-3 4.5-4.5 2 2L10 8z" />
+      </svg>
+      {strings.compose.compose}
+    </button>
     <form
       class="search"
       role="search"
@@ -775,11 +781,16 @@
         void runSearch(searchText.trim(), route.folder);
       }}
     >
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+        <circle cx="7" cy="7" r="4.25" />
+        <path d="m10.25 10.25 3 3" />
+      </svg>
       <input
         type="search"
         bind:this={searchBox}
         bind:value={searchText}
         aria-label={strings.search.label}
+        aria-keyshortcuts="/"
         placeholder={strings.search.placeholder}
         onkeydown={(e) => {
           if (e.key === 'Escape' && searching) {
@@ -788,6 +799,7 @@
           }
         }}
       />
+      <kbd aria-hidden="true">/</kbd>
     </form>
     <div class="account">
       <button
@@ -1031,53 +1043,101 @@
 <style>
   .shell {
     height: 100dvh;
-    display: grid;
-    grid-template-rows: auto auto auto 1fr;
+    display: flex;
+    flex-direction: column;
   }
 
   header {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
-    padding: 0.6rem 1rem;
+    gap: 0.75rem;
+    padding: 0.65rem 1rem;
     border-bottom: 1px solid var(--border);
-  }
-
-  .brand {
-    font-weight: 650;
-    color: var(--accent);
+    background: var(--surface);
   }
 
   .account {
     position: relative;
     margin-left: auto;
+    min-width: 0;
+    max-width: 16rem;
   }
 
   .compose {
-    margin-left: 1.5rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
     border: none;
-    border-radius: 999px;
-    padding: 0.4rem 1rem;
+    border-radius: 0.5rem;
+    padding: 0.4rem 0.7rem;
     background: var(--accent);
     color: var(--on-accent);
     font-weight: 600;
     cursor: pointer;
   }
 
+  .compose svg,
+  .search svg {
+    width: 1rem;
+    height: 1rem;
+    flex: none;
+  }
+
   .search {
+    position: relative;
     flex: 1;
     max-width: 36rem;
     min-width: 0;
   }
 
+  .search svg,
+  .search kbd {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    pointer-events: none;
+    color: var(--text-muted);
+  }
+
+  .search svg {
+    inset-inline-start: 0.6rem;
+  }
+
   .search input {
+    box-sizing: border-box;
     width: 100%;
-    padding: 0.4rem 0.75rem;
+    padding: 0.4rem 0.6rem 0.4rem 2rem;
     border: 1px solid var(--border);
-    border-radius: 999px;
-    background: var(--surface);
+    border-radius: 0.5rem;
+    background: var(--rail);
     color: var(--text);
+  }
+
+  .search input::placeholder {
+    color: var(--text-muted);
+    opacity: 1;
+  }
+
+  .search input:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+
+  .search kbd {
+    display: none;
+    inset-inline-end: 0.5rem;
+    padding: 0 0.3rem;
+    border: 1px solid var(--border);
+    border-radius: 0.25rem;
+    background: var(--surface);
+    font: inherit;
+    font-size: 0.75rem;
+  }
+
+  @media (min-width: 768px) and (pointer: fine) {
+    .search input:placeholder-shown:not(:focus) + kbd {
+      display: block;
+    }
   }
 
   .close-search {
@@ -1107,12 +1167,12 @@
   .account-button {
     font-size: 0.9rem;
     color: var(--text);
-    background: transparent;
+    background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 999px;
-    padding: 0.35rem 0.85rem;
+    border-radius: 0.5rem;
+    padding: 0.35rem 0.6rem;
     cursor: pointer;
-    max-width: 16rem;
+    max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -1153,13 +1213,30 @@
   }
 
   .panes {
+    flex: 1;
     min-height: 0;
     display: grid;
-    grid-template-columns: 14rem minmax(20rem, 28rem) minmax(0, 1fr);
+    grid-template-columns: clamp(10rem, 17vw, 14rem) clamp(16rem, 29vw, 28rem) minmax(0, 1fr);
   }
 
   /* Phone width: one pane at a time, chosen by what is open. */
   @media (max-width: 767px) {
+    header {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 8rem;
+      gap: 0.5rem;
+      padding-inline: 0.75rem;
+    }
+
+    .compose,
+    .account {
+      justify-self: end;
+    }
+
+    .account {
+      max-width: 100%;
+    }
+
     .panes {
       grid-template-columns: minmax(0, 1fr);
     }
@@ -1168,11 +1245,11 @@
       display: none !important;
     }
 
-    .panes[data-view='list'] > .middle,
-    .panes[data-view='reading'] > :global(.reading) {
-      display: grid !important;
+    .panes[data-view='list'] > .middle {
+      display: flex !important;
     }
 
+    .panes[data-view='reading'] > :global(.reading),
     .panes[data-view='folders'] > :global(nav) {
       display: block !important;
     }
@@ -1248,7 +1325,7 @@
   .buttons .danger {
     border-color: var(--danger);
     background: var(--danger);
-    color: var(--on-accent);
+    color: var(--on-danger);
   }
 
   .title {
@@ -1284,9 +1361,14 @@
 
   .middle {
     min-height: 0;
-    display: grid;
-    grid-template-rows: auto 1fr;
+    display: flex;
+    flex-direction: column;
     border-right: 1px solid var(--border);
+    background: var(--surface);
+  }
+
+  .middle > :global(.list) {
+    flex: 1;
   }
 
   h1 {
@@ -1300,5 +1382,6 @@
   .empty {
     display: grid;
     place-items: center;
+    background: var(--surface);
   }
 </style>

@@ -97,6 +97,7 @@
 
   li.selected {
     background: var(--selected);
+    box-shadow: inset 3px 0 var(--accent);
   }
 
   .row {
@@ -122,9 +123,14 @@
     white-space: nowrap;
   }
 
+  .who,
+  .subject {
+    font-weight: 550;
+  }
+
   .unread .who,
   .unread .subject {
-    font-weight: 650;
+    font-weight: 700;
   }
 
   .folder {
@@ -159,7 +165,7 @@
   }
 
   .snippet {
-    font-size: 0.9rem;
+    font-size: 0.875rem;
     color: var(--text-muted);
   }
 

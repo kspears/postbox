@@ -8,6 +8,7 @@
     type Account,
     type ErrorCode,
   } from './api';
+  import Brand from './Brand.svelte';
   import { strings } from './strings';
 
   interface Props {
@@ -70,7 +71,7 @@
 
 <main>
   <form onsubmit={submit} aria-labelledby="sign-in-title">
-    <p class="brand">{strings.appName}</p>
+    <Brand />
     <h1 id="sign-in-title">{strings.signIn.title}</h1>
 
     {#if newPassword}
@@ -127,6 +128,7 @@
     display: grid;
     gap: 1rem;
     padding: 2rem;
+    border: 1px solid var(--border);
     border-radius: 1rem;
     background: var(--surface);
     box-shadow: var(--shadow);
@@ -139,13 +141,6 @@
     border-radius: 0.5rem;
     background: var(--hover);
     font-size: 0.9rem;
-  }
-
-  .brand {
-    margin: 0;
-    font-weight: 650;
-    color: var(--accent);
-    letter-spacing: -0.01em;
   }
 
   h1 {
