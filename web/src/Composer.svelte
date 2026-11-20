@@ -65,7 +65,7 @@
   }
 
   // A message names its own parts' types; only the bitmap kinds the server renders are passed on.
-  const bitmapTypes = ['image/png', 'image/gif', 'image/jpeg', 'image/webp', 'image/bmp'];
+  const bitmapTypes = ['image/png', 'image/gif', 'image/jpeg', 'image/jpg', 'image/webp', 'image/bmp'];
   const bitmapType = (type: string): string => (bitmapTypes.includes(type) ? type : 'application/octet-stream');
 
   // Where each inline image shows from, by Content-ID; images added here are local files.

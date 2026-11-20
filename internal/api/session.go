@@ -59,7 +59,7 @@ func (a *apiHandler) clientIP(r *http.Request) netip.Addr {
 	}
 	peer, _ := netip.ParseAddr(host)
 	peer = peer.Unmap().WithZone("")
-	if a.ClientIPHeader == "" || peer != a.TrustedProxy {
+	if a.ClientIPHeader == "" || !a.TrustedProxy.IsValid() || peer != a.TrustedProxy {
 		return peer
 	}
 	if v := r.Header.Values(a.ClientIPHeader); len(v) > 0 {

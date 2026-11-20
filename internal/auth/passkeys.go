@@ -56,15 +56,19 @@ const (
 	newPasswordLife = 2 * time.Minute
 )
 
-// maxCeremonies bounds the ceremonies held at once: sign-in ones can be started by anyone.
+// maxCeremonies bounds the ceremonies held at once: sign-in ones can be started by anyone. When
+// the table is full, the ceremony nearest its expiry makes room, so a flood cannot hold the table
+// and refuse everyone; to push out someone's ceremony mid-sign-in it must fill all of it in the
+// seconds that takes, from 500 or more addresses (maxCeremoniesPerVisitor).
 const maxCeremonies = 10_000
 
 // maxCeremoniesPerVisitor bounds the open sign-in ceremonies one visitor may hold, so one client
 // cannot use up the room for everyone else.
 const maxCeremoniesPerVisitor = 20
 
-// ErrBusy means too many passkey ceremonies are under way; try again shortly.
-var ErrBusy = errors.New("too many passkey ceremonies")
+// purgeEvery is how often expired ceremonies are swept out. A visitor's count includes ones
+// expired since the last sweep.
+const purgeEvery = time.Minute
 
 // ErrVisitorBusy means this visitor already holds as many open sign-in ceremonies as it may.
 var ErrVisitorBusy = errors.New("too many passkey ceremonies from this address")
@@ -96,29 +100,36 @@ type ceremony struct {
 type ceremonies struct {
 	mu   sync.Mutex
 	byID map[string]ceremony
+	// byVisitor counts the ceremonies in byID per visitor, so a request need not scan them all.
+	byVisitor map[string]int
+	purged    time.Time
 }
 
 func (c *ceremonies) put(now time.Time, cer ceremony) (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.byID == nil {
-		c.byID = map[string]ceremony{}
+		c.byID, c.byVisitor = map[string]ceremony{}, map[string]int{}
 	}
-	open := 0
-	for id, old := range c.byID {
-		if !now.Before(old.expires) {
-			delete(c.byID, id)
-			continue
+	if now.Sub(c.purged) >= purgeEvery || len(c.byID) >= maxCeremonies {
+		for id, old := range c.byID {
+			if !now.Before(old.expires) {
+				c.remove(id)
+			}
 		}
-		if cer.visitor != "" && old.visitor == cer.visitor {
-			open++
-		}
+		c.purged = now
 	}
-	if open >= maxCeremoniesPerVisitor {
+	if cer.visitor != "" && c.byVisitor[cer.visitor] >= maxCeremoniesPerVisitor {
 		return "", ErrVisitorBusy
 	}
 	if len(c.byID) >= maxCeremonies {
-		return "", ErrBusy
+		var first string
+		for id, old := range c.byID {
+			if first == "" || old.expires.Before(c.byID[first].expires) {
+				first = id
+			}
+		}
+		c.remove(first)
 	}
 	nonce := rand.Text()
 	cer.expires = now.Add(ceremonyLife)
@@ -129,7 +140,25 @@ func (c *ceremonies) put(now time.Time, cer ceremony) (string, error) {
 		time.AfterFunc(newPasswordLife, func() { c.drop(nonce) })
 	}
 	c.byID[nonce] = cer
+	if cer.visitor != "" {
+		c.byVisitor[cer.visitor]++
+	}
 	return nonce, nil
+}
+
+// remove deletes the ceremony id and its visitor's count. c.mu must be held.
+func (c *ceremonies) remove(id string) {
+	cer, ok := c.byID[id]
+	if !ok {
+		return
+	}
+	delete(c.byID, id)
+	if cer.visitor == "" {
+		return
+	}
+	if c.byVisitor[cer.visitor]--; c.byVisitor[cer.visitor] <= 0 {
+		delete(c.byVisitor, cer.visitor)
+	}
 }
 
 // get returns the ceremony of kind for nonce and leaves it usable.
@@ -155,7 +184,7 @@ func (c *ceremonies) take(now time.Time, nonce string, kind ceremonyKind) (cerem
 func (c *ceremonies) drop(nonce string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	delete(c.byID, nonce)
+	c.remove(nonce)
 }
 
 // newWebAuthn configures the relying party for the address people open Postbox at.

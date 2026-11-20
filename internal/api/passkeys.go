@@ -125,8 +125,6 @@ func (a *apiHandler) addPasskey(w http.ResponseWriter, r *http.Request, s *sessi
 	switch {
 	case errors.Is(err, auth.ErrNoPRF):
 		writeError(w, http.StatusUnprocessableEntity, errPasskeyUnsupported)
-	case errors.Is(err, auth.ErrBusy):
-		writeError(w, http.StatusServiceUnavailable, errInternal)
 	case errors.Is(err, auth.ErrExpired), errors.Is(err, auth.ErrUnknownPasskey):
 		log.Printf("add passkey: %v", err)
 		writeError(w, http.StatusBadRequest, errPasskeyFailed)
@@ -216,8 +214,6 @@ func (a *apiHandler) ceremonyFailed(w http.ResponseWriter, r *http.Request, err 
 		return false
 	case errors.Is(err, auth.ErrVisitorBusy):
 		writeError(w, http.StatusTooManyRequests, errThrottled)
-	case errors.Is(err, auth.ErrBusy):
-		writeError(w, http.StatusServiceUnavailable, errInternal)
 	default:
 		internalError(w, r, err)
 	}

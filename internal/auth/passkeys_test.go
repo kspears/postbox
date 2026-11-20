@@ -42,14 +42,22 @@ func TestCeremonies(t *testing.T) {
 		t.Errorf("used nonce: %v", err)
 	}
 
-	// Full of live ceremonies, the next is refused; once they expire, there is room again.
+	// Full of live ceremonies, the one nearest expiry makes room for the next; once they all
+	// expire, they are all swept out.
+	first, err := c.put(now.Add(-time.Second), ceremony{kind: signIn})
+	if err != nil {
+		t.Fatal(err)
+	}
 	for range maxCeremonies - len(c.byID) {
-		put(ceremony{kind: signIn})
+		c.put(now.Add(time.Second), ceremony{kind: signIn})
 	}
-	if _, err := c.put(now, ceremony{kind: signIn}); !errors.Is(err, ErrBusy) {
-		t.Errorf("full: %v", err)
+	if _, err := c.put(now.Add(time.Second), ceremony{kind: signIn}); err != nil || len(c.byID) != maxCeremonies {
+		t.Errorf("full: %v, %d held", err, len(c.byID))
 	}
-	if _, err := c.put(now.Add(ceremonyLife), ceremony{kind: signIn}); err != nil || len(c.byID) != 1 {
+	if _, err := c.get(now.Add(time.Second), first, signIn); !errors.Is(err, ErrExpired) {
+		t.Errorf("the oldest ceremony was kept when the table was full: %v", err)
+	}
+	if _, err := c.put(now.Add(time.Second+ceremonyLife), ceremony{kind: signIn}); err != nil || len(c.byID) != 1 {
 		t.Errorf("after expiry: %v, %d held", err, len(c.byID))
 	}
 }
@@ -71,6 +79,16 @@ func TestCeremoniesPerVisitor(t *testing.T) {
 	if _, err := c.put(now, ceremony{kind: enrolment}); err != nil {
 		t.Errorf("uncounted: %v", err)
 	}
+	// Finishing one gives the visitor room for another, without waiting for a sweep.
+	for id, cer := range c.byID {
+		if cer.visitor == "a" {
+			c.drop(id)
+			break
+		}
+	}
+	if _, err := c.put(now, ceremony{kind: signIn, visitor: "a"}); err != nil {
+		t.Errorf("after one finished: %v", err)
+	}
 }
 
 func TestCeremoniesPurgeExpiredWhenNotFull(t *testing.T) {
@@ -81,7 +99,7 @@ func TestCeremoniesPurgeExpiredWhenNotFull(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := c.put(now.Add(ceremonyLife), ceremony{kind: signIn}); err != nil || len(c.byID) != 1 {
+	if _, err := c.put(now.Add(ceremonyLife+purgeEvery), ceremony{kind: signIn}); err != nil || len(c.byID) != 1 {
 		t.Errorf("after expiry: %v, %d held", err, len(c.byID))
 	}
 }
