@@ -457,9 +457,12 @@ function credentialJSON(c: PublicKeyCredential): unknown {
   return { id: c.id, rawId: toBase64url(c.rawId), type: c.type, authenticatorAttachment: c.authenticatorAttachment, response, clientExtensionResults: {} };
 }
 
+// The PRF output, or '' for none. Anything but the 32 bytes the spec gives counts as none, so a
+// provider that answers out of spec falls back to the server's key rather than failing.
 function prfOutput(c: PublicKeyCredential): string {
-  const first = c.getClientExtensionResults().prf?.results?.first;
-  return first ? toBase64url(first) : '';
+  const first: unknown = c.getClientExtensionResults().prf?.results?.first;
+  const usable = (first instanceof ArrayBuffer || ArrayBuffer.isView(first)) && first.byteLength === 32;
+  return usable ? toBase64url(first) : '';
 }
 
 /** The person closed the browser's passkey prompt, or it timed out. */
@@ -482,8 +485,8 @@ export interface NewPasskey {
   rawId: ArrayBuffer;
   salt?: string;
   prf: string;
-  // The provider said it supports PRF. One that does not (1Password, Bitwarden) is saved
-  // without, and the server locks its password instead.
+  // The provider said it supports PRF. One that does not, or says so and then gives no output,
+  // is saved without, and the server locks its password instead.
   prfEnabled: boolean;
 }
 

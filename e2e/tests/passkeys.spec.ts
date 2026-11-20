@@ -36,6 +36,26 @@ test('a passkey without PRF signs in through the server key', async ({ page }) =
   await expectInbox(page);
 });
 
+// As 1Password's extension does (FS-5593): PRF reported as enabled, but no output ever comes.
+test('a passkey that claims PRF and gives none falls back to the server key', async ({ page }) => {
+  await addAuthenticator(page);
+  await page.addInitScript(() => {
+    const original = PublicKeyCredential.prototype.getClientExtensionResults;
+    PublicKeyCredential.prototype.getClientExtensionResults = function () {
+      const results = original.call(this);
+      return results.prf ? { ...results, prf: { enabled: true } } : results;
+    };
+  });
+  await signIn(page, 'halfprf@example.test', seedPassword());
+  await expectInbox(page);
+  await addPasskey(page);
+  await closeSettings(page);
+  await signOut(page);
+
+  await page.getByRole('button', { name: 'Sign in with a passkey' }).click();
+  await expectInbox(page);
+});
+
 test('removing the last passkey turns "Require passkey" off', async ({ page }) => {
   await addAuthenticator(page);
   await signIn(page, 'remover@example.test', seedPassword());
