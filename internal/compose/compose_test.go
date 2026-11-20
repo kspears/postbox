@@ -210,6 +210,20 @@ func TestRichDraft(t *testing.T) {
 	}
 }
 
+// A draft is whatever sits in the Drafts folder, so its HTML is cleaned before the editor loads it.
+func TestDraftHTMLIsSanitised(t *testing.T) {
+	raw := []byte("From: alice@example.test\r\nTo: bob@example.test\r\nSubject: x\r\n" +
+		"Content-Type: text/html; charset=utf-8\r\n\r\n" +
+		"<html><body><p>Hi</p><img src=x onerror=alert(1)><script>alert(1)</script></body></html>")
+	got, err := FromDraft(raw, "Drafts", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got.HTML, "<p>Hi</p>") || strings.Contains(got.HTML, "onerror") || strings.Contains(got.HTML, "script") || strings.Contains(got.HTML, "alert") {
+		t.Errorf("html %q", got.HTML)
+	}
+}
+
 func TestRespondFromTheIdentityAddressed(t *testing.T) {
 	ids := []Person{{Email: "alice@example.test"}, {Name: "Sales", Email: "sales@example.test"}}
 	o := &Original{

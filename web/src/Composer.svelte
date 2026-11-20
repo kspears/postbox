@@ -64,6 +64,10 @@
     return `<p></p>${richSignature(sig)}${rest}`;
   }
 
+  // A message names its own parts' types; only the bitmap kinds the server renders are passed on.
+  const bitmapTypes = ['image/png', 'image/gif', 'image/jpeg', 'image/webp', 'image/bmp'];
+  const bitmapType = (type: string): string => (bitmapTypes.includes(type) ? type : 'application/octet-stream');
+
   // Where each inline image shows from, by Content-ID; images added here are local files.
   const images = new SvelteMap<string, string>();
   // Images already in a reopened draft are fetched before the editor shows them.
@@ -73,7 +77,7 @@
       .map(async (a) => {
         try {
           const response = await fetch(partURL(a.folder!, a.uid!, a.part!), { credentials: 'same-origin' });
-          if (response.ok) images.set(a.contentId!, URL.createObjectURL(new Blob([await response.blob()], { type: a.type })));
+          if (response.ok) images.set(a.contentId!, URL.createObjectURL(new Blob([await response.blob()], { type: bitmapType(a.type) })));
         } catch {
           // The image shows empty; it is still sent.
         }

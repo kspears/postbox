@@ -143,7 +143,7 @@ func TestSignedOutRequests(t *testing.T) {
 
 func TestSecurityHeaders(t *testing.T) {
 	w := get(t, newHandler(t, dist), "GET", "/")
-	for _, h := range []string{"Content-Security-Policy", "X-Content-Type-Options", "Referrer-Policy"} {
+	for _, h := range []string{"Content-Security-Policy", "X-Content-Type-Options", "Referrer-Policy", "Cross-Origin-Opener-Policy"} {
 		if w.Header().Get(h) == "" {
 			t.Errorf("no %s", h)
 		}
