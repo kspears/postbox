@@ -110,6 +110,31 @@ test('criterion 17: two selected conversations dragged to a folder, Move to…, 
   await expect.poll(() => foldersOf(organiser)).toContain('Receipts/Loose');
 });
 
+test('subfolders start collapsed, count toward their parent, and stay open once opened', async ({ page }) => {
+  await imap(organiser, [
+    'CREATE "Clients"',
+    'CREATE "Clients/Acme"',
+    'SELECT INBOX',
+    'COPY 1 "Clients/Acme"',
+    'SELECT "Clients/Acme"',
+    'STORE 1 -FLAGS (\\Seen)',
+  ]);
+  await page.reload();
+  const nav = page.getByRole('navigation', { name: 'Folders' });
+  await expect(folderButton(page, 'Clients')).toBeVisible();
+  await expect(folderButton(page, 'Acme')).toHaveCount(0);
+  await expect(folderButton(page, 'Clients').getByLabel('1 unread')).toBeVisible();
+
+  await nav.getByRole('button', { name: 'Expand Clients' }).click();
+  await expect(folderButton(page, 'Acme').getByLabel('1 unread')).toBeVisible();
+  await expect(folderButton(page, 'Clients').getByLabel(/unread/)).toHaveCount(0);
+
+  await page.reload();
+  await expect(folderButton(page, 'Acme')).toBeVisible();
+  await nav.getByRole('button', { name: 'Collapse Clients' }).click();
+  await expect(folderButton(page, 'Acme')).toHaveCount(0);
+});
+
 test('permanent delete is refused outside Trash', async ({ page, baseURL }) => {
   const response = await page.request.post('/api/expunge', {
     headers: { Origin: baseURL! },

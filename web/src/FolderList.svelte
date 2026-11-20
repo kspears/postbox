@@ -5,6 +5,8 @@
 </script>
 
 <script lang="ts">
+  import { untrack } from 'svelte';
+  import { SvelteSet } from 'svelte/reactivity';
   import type { ErrorCode, Folder, Role } from './api';
   import { strings } from './strings';
 
@@ -20,6 +22,8 @@
   };
 
   interface Props {
+    // Whose folders these are: which folders are expanded is kept per account in this browser.
+    account: string;
     folders: Folder[];
     current: string;
     onOpen: (name: string) => void;
@@ -33,8 +37,18 @@
     // "Move folder…": choose a new parent without dragging.
     onPickParent: (folder: Folder) => void;
   }
-  const { folders, current, onOpen, onDropConversations, onCreate, onRename, onDelete, onMoveFolder, onPickParent }: Props =
-    $props();
+  const {
+    account,
+    folders,
+    current,
+    onOpen,
+    onDropConversations,
+    onCreate,
+    onRename,
+    onDelete,
+    onMoveFolder,
+    onPickParent,
+  }: Props = $props();
 
   const byName = $derived(new Map(folders.map((f) => [f.name, f])));
 
@@ -56,6 +70,62 @@
     return false;
   }
 
+  // --- collapsing ---
+  // Folders start collapsed; this browser remembers the ones the user opened.
+  const storageKey = untrack(() => `postbox.expanded.${account}`);
+  const expanded = new SvelteSet<string>(loadExpanded());
+
+  function loadExpanded(): string[] {
+    try {
+      const saved: unknown = JSON.parse(localStorage.getItem(storageKey) ?? '[]');
+      return Array.isArray(saved) ? saved.filter((n): n is string => typeof n === 'string') : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function saveExpanded(): void {
+    try {
+      localStorage.setItem(storageKey, JSON.stringify([...expanded]));
+    } catch {
+      // Storage may be off; the folders still open and close for this page.
+    }
+  }
+
+  function setExpanded(name: string, open: boolean): void {
+    if (open === expanded.has(name)) return;
+    if (open) expanded.add(name);
+    else expanded.delete(name);
+    saveExpanded();
+  }
+
+  const parents = $derived(new Set(folders.flatMap((f) => (f.parent ? [f.parent] : []))));
+
+  const shown = $derived(
+    folders.filter((f) => {
+      for (let p = f.parent, d = 0; p && d < folders.length; p = byName.get(p)?.parent, d++) {
+        if (!expanded.has(p)) return false;
+      }
+      return true;
+    }),
+  );
+
+  // A collapsed folder counts the unread beneath it too, so new mail is never out of sight.
+  function unreadShown(folder: Folder): number {
+    if (!parents.has(folder.name) || expanded.has(folder.name)) return folder.unread;
+    return folders.reduce((n, f) => (within(f, folder) ? n + f.unread : n), 0);
+  }
+
+  // Opening a folder reveals it. Only when the open folder changes, so collapsing its parent
+  // afterwards sticks through folder reloads.
+  const currentParent = $derived(byName.get(current)?.parent);
+  $effect(() => {
+    const first = currentParent;
+    untrack(() => {
+      for (let p = first, d = 0; p && d < folders.length; p = byName.get(p)?.parent, d++) setExpanded(p, true);
+    });
+  });
+
   // --- menus and inline editing ---
   let menuFor = $state<string | null>(null);
   // A folder being renamed, or the parent ("" for the top level) a new folder goes under.
@@ -65,6 +135,8 @@
 
   function startCreate(parent: string): void {
     menuFor = null;
+    // So the new subfolder is in view once made.
+    if (parent) setExpanded(parent, true);
     editing = { kind: 'create', parent };
     draft = '';
     editError = '';
@@ -160,7 +232,7 @@
 
 <nav aria-label={strings.folders.heading}>
   <ul>
-    {#each folders as folder (folder.name)}
+    {#each shown as folder (folder.name)}
       <li
         style:--depth={depths.get(folder.name) ?? 0}
         class:drop-into={over?.name === folder.name && over.zone === 'into'}
@@ -198,8 +270,8 @@
                 onclick={() => onOpen(folder.name)}
               >
                 <span class="label">{folder.label}</span>
-                {#if folder.unread > 0}
-                  <span class="count" aria-label={strings.folders.unread(folder.unread)}>{folder.unread}</span>
+                {#if unreadShown(folder) > 0}
+                  <span class="count" aria-label={strings.folders.unread(unreadShown(folder))}>{unreadShown(folder)}</span>
                 {/if}
                 {#if folder.role}
                   <svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -209,6 +281,22 @@
               </button>
             {:else}
               <span class="holder">{folder.label}</span>
+            {/if}
+            <!-- After the label in the DOM, so the row's text starts with the name; shown first by order. -->
+            {#if parents.has(folder.name)}
+              <button
+                type="button"
+                class="toggle"
+                aria-expanded={expanded.has(folder.name)}
+                aria-label={(expanded.has(folder.name) ? strings.folders.collapse : strings.folders.expand)(folder.label)}
+                onclick={() => setExpanded(folder.name, !expanded.has(folder.name))}
+              >
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M6 4l4 4-4 4" />
+                </svg>
+              </button>
+            {:else if parents.size > 0}
+              <span class="toggle" aria-hidden="true"></span>
             {/if}
             {#if folder.selectable || !folder.role}
               <button
@@ -351,6 +439,45 @@
 
   .holder {
     color: var(--text-muted);
+  }
+
+  .toggle {
+    order: -1;
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 1.25rem;
+    height: 1.25rem;
+    padding: 0;
+    border: none;
+    border-radius: 0.3rem;
+    background: transparent;
+    color: var(--text-muted);
+  }
+
+  button.toggle {
+    cursor: pointer;
+  }
+
+  button.toggle:hover {
+    background: var(--hover);
+    color: var(--text);
+  }
+
+  .toggle svg {
+    width: 0.85rem;
+    height: 0.85rem;
+    transition: transform 0.12s;
+  }
+
+  .toggle[aria-expanded='true'] svg {
+    transform: rotate(90deg);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .toggle svg {
+      transition: none;
+    }
   }
 
   .label {

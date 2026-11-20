@@ -87,6 +87,8 @@ export const strings = {
     delete: 'Delete folder',
     name: 'Folder name',
     actionsFor: (name: string) => `Actions for ${name}`,
+    expand: (name: string) => `Expand ${name}`,
+    collapse: (name: string) => `Collapse ${name}`,
     exists: (name: string) => `A folder named “${name}” already exists.`,
     confirmDelete: (name: string, messages: number) =>
       `Delete “${name}” and the ${messages} messages in it? This cannot be undone.`,
