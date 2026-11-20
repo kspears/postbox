@@ -267,7 +267,11 @@
       <ul class="identities">
         {#each passkeys as p (p.id)}
           <li>
-            <span class="who">{strings.settings.passkeyAdded(addedOn(p))}</span>
+            <span class="who"
+              >{strings.settings.passkeyAdded(addedOn(p))}{#if p.lock === 'server'}<span class="lock"
+                  >{strings.settings.passkeyServerLock}</span
+                >{/if}</span
+            >
             <button type="button" onclick={() => forget(p)} aria-label={strings.settings.removePasskey(addedOn(p))}>
               {strings.settings.removeShort}
             </button>
@@ -440,6 +444,12 @@
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  .lock {
+    display: block;
+    font-size: 0.85rem;
+    color: var(--text-muted);
   }
 
   .identity {
