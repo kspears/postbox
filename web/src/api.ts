@@ -408,7 +408,7 @@ function fromBase64url(s: string): Uint8Array<ArrayBuffer> {
 }
 
 function toBase64url(bytes: ArrayBuffer | ArrayBufferView): string {
-  const view = bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const view = ArrayBuffer.isView(bytes) ? new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength) : new Uint8Array(bytes);
   return btoa(String.fromCharCode(...view)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
@@ -461,8 +461,11 @@ function credentialJSON(c: PublicKeyCredential): unknown {
 // provider that answers out of spec falls back to the server's key rather than failing.
 function prfOutput(c: PublicKeyCredential): string {
   const first: unknown = c.getClientExtensionResults().prf?.results?.first;
-  const usable = (first instanceof ArrayBuffer || ArrayBuffer.isView(first)) && first.byteLength === 32;
-  return usable ? toBase64url(first) : '';
+  // By tag, not instanceof: an extension may hand back a buffer from its own realm.
+  const buffer = Object.prototype.toString.call(first) === '[object ArrayBuffer]';
+  if (!buffer && !ArrayBuffer.isView(first)) return '';
+  const bytes = first as ArrayBuffer | ArrayBufferView;
+  return bytes.byteLength === 32 ? toBase64url(bytes) : '';
 }
 
 /** The person closed the browser's passkey prompt, or it timed out. */

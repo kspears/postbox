@@ -88,7 +88,8 @@ volume, copying `postbox.db` with its `-wal` file. A copy of it alone reveals no
 password.
 
 **Passkeys** work for passkey providers with the WebAuthn PRF extension. For providers without
-it, such as 1Password and Bitwarden, set `POSTBOX_PASSKEY_KEY` (see Configuration) and keep it
+it, such as Bitwarden, or that report it and then give no usable output, such as 1Password's
+browser extension, set `POSTBOX_PASSKEY_KEY` (see Configuration) and keep it
 away from the state volume and its backups: the two together reveal the passwords stored for
 those passkeys.
 
