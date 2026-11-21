@@ -1,0 +1,53 @@
+# Weekly update PRs. Minor and patch updates come as one PR per ecosystem; a major
+# version comes on its own. A release is proposed only once it is a week old, so a
+# compromised version has time to be pulled before it reaches a PR.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      go:
+        update-types: [minor, patch]
+
+  # The app's frontend and the browser tests. @playwright/test and the Playwright image in
+  # e2e/Dockerfile must be the same release, and no one PR can move both, so both are left to
+  # a hand-made change.
+  - package-ecosystem: npm
+    directories: [/web, /e2e]
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    ignore:
+      - dependency-name: "@playwright/test"
+    groups:
+      npm:
+        update-types: [minor, patch]
+
+  # Base images pinned by tag and digest: the release image and the test postfix. The e2e
+  # image is Playwright, which moves with @playwright/test by hand.
+  - package-ecosystem: docker
+    directories: [/, /deploy/ci/postfix]
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    ignore:
+      - dependency-name: "mcr.microsoft.com/playwright"
+    groups:
+      base-images:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        update-types: [minor, patch]
