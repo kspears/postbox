@@ -92,7 +92,7 @@ func TestCeremoniesPerVisitor(t *testing.T) {
 	}
 }
 
-func TestCeremoniesVisitorCapSkipsScan(t *testing.T) {
+func TestCeremoniesVisitorCapUntilTheSweep(t *testing.T) {
 	var c ceremonies
 	now := time.Unix(1_800_000_000, 0)
 	for range maxCeremoniesPerVisitor {
@@ -100,14 +100,22 @@ func TestCeremoniesVisitorCapSkipsScan(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// Long after they expired and a sweep is due, the visitor is still refused and nothing is
-	// swept: the cap is checked first.
-	later := now.Add(ceremonyLife + purgeEvery)
-	if _, err := c.put(later, ceremony{kind: signIn, visitor: "a"}); !errors.Is(err, ErrVisitorBusy) {
+	// Expired, but no sweep is due yet: refused without a scan.
+	expired := now.Add(ceremonyLife)
+	c.purged = expired
+	if _, err := c.put(expired, ceremony{kind: signIn, visitor: "a"}); !errors.Is(err, ErrVisitorBusy) {
 		t.Errorf("over the cap: %v", err)
 	}
 	if len(c.byID) != maxCeremoniesPerVisitor {
 		t.Errorf("a refused put swept the table: %d held", len(c.byID))
+	}
+	// Once the sweep is due, the visitor's own request runs it and gets in, even with no one
+	// else signing in to trigger it.
+	if _, err := c.put(expired.Add(purgeEvery), ceremony{kind: signIn, visitor: "a"}); err != nil {
+		t.Errorf("after the sweep: %v", err)
+	}
+	if len(c.byID) != 1 || c.byVisitor["a"] != 1 {
+		t.Errorf("after the sweep: %d held, %d for the visitor", len(c.byID), c.byVisitor["a"])
 	}
 }
 
