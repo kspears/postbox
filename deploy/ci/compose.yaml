@@ -92,6 +92,7 @@ services:
       # The browser tests choose the address each test signs in from, so throttling tests do
       # not block each other. Behind a real proxy this is the proxy's header.
       POSTBOX_CLIENT_IP_HEADER: X-Test-Client-IP
+      POSTBOX_TRUSTED_PROXY: 172.29.77.10
     volumes:
       # Only the certificate: Postbox never sees the mail server's private keys.
       - ca:/ca:ro
@@ -154,6 +155,7 @@ services:
       POSTBOX_PUBLIC_URL: http://postbox-untrusted.localhost
       POSTBOX_LISTEN: :80
       POSTBOX_CLIENT_IP_HEADER: X-Test-Client-IP
+      POSTBOX_TRUSTED_PROXY: 172.29.77.10
     networks:
       default:
         aliases:
@@ -174,6 +176,7 @@ services:
       POSTBOX_LISTEN: :80
       POSTBOX_CA_FILE: /ca/ca.crt
       POSTBOX_CLIENT_IP_HEADER: X-Test-Client-IP
+      POSTBOX_TRUSTED_PROXY: 172.29.77.10
     volumes:
       - ca:/ca:ro
     networks:
@@ -191,6 +194,10 @@ services:
     environment:
       POSTBOX_URL: http://postbox.localhost
       SEED_PASSWORD: ${SEED_PASSWORD:-}
+    # The one peer the Postbox services believe X-Test-Client-IP from.
+    networks:
+      default:
+        ipv4_address: 172.29.77.10
     volumes:
       # Signed-in browser state kept across a Postbox restart.
       - e2e_state:/e2e/.state
@@ -198,6 +205,12 @@ services:
       - ca:/ca:ro
       # To change a password on the mail server, as its administrator would.
       - auth:/auth
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.29.77.0/24
 
 volumes:
   keys:

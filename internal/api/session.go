@@ -48,25 +48,28 @@ func internalError(w http.ResponseWriter, r *http.Request, err error) {
 	writeError(w, http.StatusInternalServerError, errInternal)
 }
 
-// clientIP is the person's address: the proxy's header when one is configured and present,
-// otherwise the connection's. The rightmost entry is used because a proxy appends the address
-// it saw, and anything to its left came from the client.
+// clientIP is the person's address: the proxy's header when one is configured and present and
+// the connection comes from the trusted proxy, otherwise the connection's. Any other peer could
+// write the header itself. The rightmost entry is used because a proxy appends the address it
+// saw, and anything to its left came from the client.
 func (a *apiHandler) clientIP(r *http.Request) netip.Addr {
-	if a.ClientIPHeader != "" {
-		if v := r.Header.Values(a.ClientIPHeader); len(v) > 0 {
-			last := v[len(v)-1]
-			last = strings.TrimSpace(last[strings.LastIndexByte(last, ',')+1:])
-			if ip, err := netip.ParseAddr(last); err == nil {
-				return ip.Unmap().WithZone("")
-			}
-		}
-	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		host = r.RemoteAddr
 	}
-	ip, _ := netip.ParseAddr(host)
-	return ip.Unmap().WithZone("")
+	peer, _ := netip.ParseAddr(host)
+	peer = peer.Unmap().WithZone("")
+	if a.ClientIPHeader == "" || !a.TrustedProxy.IsValid() || peer != a.TrustedProxy {
+		return peer
+	}
+	if v := r.Header.Values(a.ClientIPHeader); len(v) > 0 {
+		last := v[len(v)-1]
+		last = strings.TrimSpace(last[strings.LastIndexByte(last, ',')+1:])
+		if ip, err := netip.ParseAddr(last); err == nil {
+			return ip.Unmap().WithZone("")
+		}
+	}
+	return peer
 }
 
 type signInRequest struct {

@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net"
+	"net/netip"
 	"net/url"
 	"strings"
 )
@@ -17,7 +18,9 @@ type Config struct {
 	State          string
 	Listen         string
 	ClientIPHeader string
-	CAFile         string
+	// TrustedProxy is the only peer whose ClientIPHeader is believed.
+	TrustedProxy netip.Addr
+	CAFile       string
 	// PasskeyKey locks the password stored for a passkey that has no PRF output. Without it
 	// such passkeys are refused.
 	PasskeyKey []byte
@@ -53,6 +56,15 @@ func FromEnv(getenv func(string) string) (Config, error) {
 			return Config{}, fmt.Errorf("POSTBOX_LISTEN must be [host]:port, got %q", v)
 		}
 		c.Listen = v
+	}
+	if v := getenv("POSTBOX_TRUSTED_PROXY"); v != "" {
+		if c.TrustedProxy, err = netip.ParseAddr(v); err != nil {
+			return Config{}, fmt.Errorf("POSTBOX_TRUSTED_PROXY must be one IP address, the reverse proxy's; a network is not accepted. Got %q", v)
+		}
+		c.TrustedProxy = c.TrustedProxy.Unmap().WithZone("")
+	}
+	if c.ClientIPHeader != "" && !c.TrustedProxy.IsValid() {
+		return Config{}, fmt.Errorf("POSTBOX_CLIENT_IP_HEADER is set but POSTBOX_TRUSTED_PROXY is not; set it to the reverse proxy's IP address, the only peer whose header is believed")
 	}
 	if v := getenv("POSTBOX_PASSKEY_KEY"); v != "" {
 		key, err := base64.StdEncoding.DecodeString(v)

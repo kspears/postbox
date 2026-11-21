@@ -56,11 +56,22 @@ const (
 	newPasswordLife = 2 * time.Minute
 )
 
-// maxCeremonies bounds the ceremonies held at once: sign-in ones can be started by anyone.
+// maxCeremonies bounds the ceremonies held at once: sign-in ones can be started by anyone. When
+// the table is full, the ceremony nearest its expiry makes room, so a flood cannot hold the table
+// and refuse everyone; to push out someone's ceremony mid-sign-in it must fill all of it in the
+// seconds that takes, from 500 or more addresses (maxCeremoniesPerVisitor).
 const maxCeremonies = 10_000
 
-// ErrBusy means too many passkey ceremonies are under way; try again shortly.
-var ErrBusy = errors.New("too many passkey ceremonies")
+// maxCeremoniesPerVisitor bounds the open sign-in ceremonies one visitor may hold, so one client
+// cannot use up the room for everyone else.
+const maxCeremoniesPerVisitor = 20
+
+// purgeEvery is how often expired ceremonies are swept out. A visitor's count includes ones
+// expired since the last sweep.
+const purgeEvery = time.Minute
+
+// ErrVisitorBusy means this visitor already holds as many open sign-in ceremonies as it may.
+var ErrVisitorBusy = errors.New("too many passkey ceremonies from this address")
 
 // What a ceremony is for. A nonce finishes only a ceremony of its own kind.
 type ceremonyKind int
@@ -77,6 +88,8 @@ type ceremony struct {
 	expires time.Time
 	data    webauthn.SessionData
 	account string
+	// A sign-in: the throttle key of the visitor who started it. Empty when not counted per visitor.
+	visitor string
 	// Enrolment: the account's user handle.
 	handle []byte
 	// A sign-in waiting for a new password: the passkey and the key its password is sealed with.
@@ -87,25 +100,46 @@ type ceremony struct {
 type ceremonies struct {
 	mu   sync.Mutex
 	byID map[string]ceremony
+	// byVisitor counts the ceremonies in byID per visitor, so a request need not scan them all.
+	byVisitor map[string]int
+	purged    time.Time
 }
 
 func (c *ceremonies) put(now time.Time, cer ceremony) (string, error) {
+	nonce := rand.Text()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.byID == nil {
-		c.byID = map[string]ceremony{}
+		c.byID, c.byVisitor = map[string]ceremony{}, map[string]int{}
 	}
-	if len(c.byID) >= maxCeremonies {
+	atCap := func() bool { return cer.visitor != "" && c.byVisitor[cer.visitor] >= maxCeremoniesPerVisitor }
+	sweepDue := now.Sub(c.purged) >= purgeEvery
+	// A visitor at its cap is refused without a scan until the next sweep is due. The count may
+	// include ceremonies expired since the last sweep, so a due sweep runs before the final say.
+	if atCap() && !sweepDue {
+		return "", ErrVisitorBusy
+	}
+	var nearest string
+	if len(c.byID) >= maxCeremonies || sweepDue {
+		// One pass: sweep the expired and note the live ceremony nearest its expiry.
+		var nearestExpires time.Time
 		for id, old := range c.byID {
 			if !now.Before(old.expires) {
-				delete(c.byID, id)
+				c.remove(id)
+				continue
+			}
+			if nearest == "" || old.expires.Before(nearestExpires) {
+				nearest, nearestExpires = id, old.expires
 			}
 		}
-		if len(c.byID) >= maxCeremonies {
-			return "", ErrBusy
-		}
+		c.purged = now
 	}
-	nonce := rand.Text()
+	if atCap() {
+		return "", ErrVisitorBusy
+	}
+	if len(c.byID) >= maxCeremonies {
+		c.remove(nearest)
+	}
 	cer.expires = now.Add(ceremonyLife)
 	if cer.kind == newPassword {
 		cer.expires = now.Add(newPasswordLife)
@@ -114,7 +148,25 @@ func (c *ceremonies) put(now time.Time, cer ceremony) (string, error) {
 		time.AfterFunc(newPasswordLife, func() { c.drop(nonce) })
 	}
 	c.byID[nonce] = cer
+	if cer.visitor != "" {
+		c.byVisitor[cer.visitor]++
+	}
 	return nonce, nil
+}
+
+// remove deletes the ceremony id and its visitor's count. c.mu must be held.
+func (c *ceremonies) remove(id string) {
+	cer, ok := c.byID[id]
+	if !ok {
+		return
+	}
+	delete(c.byID, id)
+	if cer.visitor == "" {
+		return
+	}
+	if c.byVisitor[cer.visitor]--; c.byVisitor[cer.visitor] <= 0 {
+		delete(c.byVisitor, cer.visitor)
+	}
 }
 
 // get returns the ceremony of kind for nonce and leaves it usable.
@@ -140,7 +192,7 @@ func (c *ceremonies) take(now time.Time, nonce string, kind ceremonyKind) (cerem
 func (c *ceremonies) drop(nonce string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	delete(c.byID, nonce)
+	c.remove(nonce)
 }
 
 // newWebAuthn configures the relying party for the address people open Postbox at.
@@ -251,8 +303,9 @@ func (a *Authenticator) Enrol(ctx context.Context, account, password, nonce stri
 }
 
 // SignInOptions starts a passkey sign-in: what the browser's get() is given, and the nonce
-// that finishes it. No account is named; the passkey says whose it is.
-func (a *Authenticator) SignInOptions() (string, *protocol.CredentialAssertion, error) {
+// that finishes it. No account is named; the passkey says whose it is. The ceremony counts
+// against clientIP's share of the open ones.
+func (a *Authenticator) SignInOptions(clientIP netip.Addr) (string, *protocol.CredentialAssertion, error) {
 	options, data, err := a.webauthn.BeginDiscoverableLogin(
 		webauthn.WithUserVerification(protocol.VerificationRequired),
 		webauthn.WithAssertionExtensions(webauthn.WithExtensionPRF(protocol.PRFValues{First: prfSalt})),
@@ -260,7 +313,7 @@ func (a *Authenticator) SignInOptions() (string, *protocol.CredentialAssertion, 
 	if err != nil {
 		return "", nil, err
 	}
-	nonce, err := a.pending.put(a.clock.Now(), ceremony{kind: signIn, data: *data})
+	nonce, err := a.pending.put(a.clock.Now(), ceremony{kind: signIn, data: *data, visitor: throttleKey(clientIP)})
 	return nonce, options, err
 }
 

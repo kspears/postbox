@@ -10,6 +10,8 @@ import (
 	"github.com/emersion/go-message"
 	_ "github.com/emersion/go-message/charset"
 	gomail "github.com/emersion/go-message/mail"
+
+	"github.com/kspears/postbox/internal/render"
 )
 
 // Original is a received message as reply and forward need it.
@@ -140,7 +142,7 @@ func FromDraft(raw []byte, folder string, uid uint32) (*Draft, error) {
 		d.From = o.From[0]
 	}
 	if body := innerBody(o.HTML); body != "" && body != TextToHTML(o.Text) {
-		d.HTML = body
+		d.HTML = render.Composed(body)
 	}
 	return d, nil
 }

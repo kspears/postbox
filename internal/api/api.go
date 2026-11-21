@@ -6,6 +6,7 @@ import (
 	"context"
 	"io/fs"
 	"net/http"
+	"net/netip"
 	"strings"
 
 	"github.com/kspears/postbox/internal/addressbook"
@@ -35,6 +36,8 @@ type Deps struct {
 	Origin string
 	// ClientIPHeader, when set, names the reverse proxy's header with the person's address.
 	ClientIPHeader string
+	// TrustedProxy is the one peer whose ClientIPHeader is believed.
+	TrustedProxy netip.Addr
 }
 
 // NewHandler serves the frontend in dist and the endpoints beside it.
@@ -99,6 +102,7 @@ func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("Cross-Origin-Opener-Policy", "same-origin")
 		h.Set("Referrer-Policy", "no-referrer")
 		h.Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data: blob:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 		next.ServeHTTP(w, r)

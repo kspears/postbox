@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -42,14 +43,132 @@ func TestCeremonies(t *testing.T) {
 		t.Errorf("used nonce: %v", err)
 	}
 
-	// Full of live ceremonies, the next is refused; once they expire, there is room again.
+	// Full of live ceremonies, the one nearest expiry makes room for the next; once they all
+	// expire, they are all swept out.
+	first, err := c.put(now.Add(-time.Second), ceremony{kind: signIn})
+	if err != nil {
+		t.Fatal(err)
+	}
 	for range maxCeremonies - len(c.byID) {
-		put(ceremony{kind: signIn})
+		c.put(now.Add(time.Second), ceremony{kind: signIn})
 	}
-	if _, err := c.put(now, ceremony{kind: signIn}); !errors.Is(err, ErrBusy) {
-		t.Errorf("full: %v", err)
+	if _, err := c.put(now.Add(time.Second), ceremony{kind: signIn}); err != nil || len(c.byID) != maxCeremonies {
+		t.Errorf("full: %v, %d held", err, len(c.byID))
 	}
-	if _, err := c.put(now.Add(ceremonyLife), ceremony{kind: signIn}); err != nil || len(c.byID) != 1 {
+	if _, err := c.get(now.Add(time.Second), first, signIn); !errors.Is(err, ErrExpired) {
+		t.Errorf("the oldest ceremony was kept when the table was full: %v", err)
+	}
+	if _, err := c.put(now.Add(time.Second+ceremonyLife), ceremony{kind: signIn}); err != nil || len(c.byID) != 1 {
+		t.Errorf("after expiry: %v, %d held", err, len(c.byID))
+	}
+}
+
+func TestCeremoniesPerVisitor(t *testing.T) {
+	var c ceremonies
+	now := time.Unix(1_800_000_000, 0)
+	for range maxCeremoniesPerVisitor {
+		if _, err := c.put(now, ceremony{kind: signIn, visitor: "a"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := c.put(now, ceremony{kind: signIn, visitor: "a"}); !errors.Is(err, ErrVisitorBusy) {
+		t.Errorf("over the cap: %v", err)
+	}
+	if _, err := c.put(now, ceremony{kind: signIn, visitor: "b"}); err != nil {
+		t.Errorf("another visitor: %v", err)
+	}
+	if _, err := c.put(now, ceremony{kind: enrolment}); err != nil {
+		t.Errorf("uncounted: %v", err)
+	}
+	// Finishing one gives the visitor room for another, without waiting for a sweep.
+	for id, cer := range c.byID {
+		if cer.visitor == "a" {
+			c.drop(id)
+			break
+		}
+	}
+	if _, err := c.put(now, ceremony{kind: signIn, visitor: "a"}); err != nil {
+		t.Errorf("after one finished: %v", err)
+	}
+}
+
+func TestCeremoniesVisitorCapUntilTheSweep(t *testing.T) {
+	var c ceremonies
+	now := time.Unix(1_800_000_000, 0)
+	for range maxCeremoniesPerVisitor {
+		if _, err := c.put(now, ceremony{kind: signIn, visitor: "a"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Expired, but no sweep is due yet: refused without a scan.
+	expired := now.Add(ceremonyLife)
+	c.purged = expired
+	if _, err := c.put(expired, ceremony{kind: signIn, visitor: "a"}); !errors.Is(err, ErrVisitorBusy) {
+		t.Errorf("over the cap: %v", err)
+	}
+	if len(c.byID) != maxCeremoniesPerVisitor {
+		t.Errorf("a refused put swept the table: %d held", len(c.byID))
+	}
+	// Once the sweep is due, the visitor's own request runs it and gets in, even with no one
+	// else signing in to trigger it.
+	if _, err := c.put(expired.Add(purgeEvery), ceremony{kind: signIn, visitor: "a"}); err != nil {
+		t.Errorf("after the sweep: %v", err)
+	}
+	if len(c.byID) != 1 || c.byVisitor["a"] != 1 {
+		t.Errorf("after the sweep: %d held, %d for the visitor", len(c.byID), c.byVisitor["a"])
+	}
+}
+
+func TestCeremoniesFullEvictsNearestExpiry(t *testing.T) {
+	var c ceremonies
+	now := time.Unix(1_800_000_000, 0)
+	c.byID, c.byVisitor = map[string]ceremony{}, map[string]int{}
+	c.purged = now
+	for i := range maxCeremonies {
+		c.byID[fmt.Sprint(i)] = ceremony{kind: signIn, expires: now.Add(time.Hour + time.Duration(i)*time.Second)}
+	}
+	c.byID["soon"] = ceremony{kind: signIn, expires: now.Add(time.Minute)}
+	delete(c.byID, "0")
+	if _, err := c.put(now, ceremony{kind: signIn}); err != nil || len(c.byID) != maxCeremonies {
+		t.Fatalf("full: %v, %d held", err, len(c.byID))
+	}
+	if _, ok := c.byID["soon"]; ok {
+		t.Error("the ceremony nearest expiry was kept")
+	}
+	if _, ok := c.byID["1"]; !ok {
+		t.Error("a later ceremony was evicted")
+	}
+}
+
+func TestCeremoniesFullPurgesExpiredFirst(t *testing.T) {
+	var c ceremonies
+	now := time.Unix(1_800_000_000, 0)
+	c.byID, c.byVisitor = map[string]ceremony{}, map[string]int{}
+	c.purged = now
+	for i := range maxCeremonies {
+		exp := now.Add(time.Hour)
+		if i%2 == 0 {
+			exp = now.Add(-time.Second)
+		}
+		c.byID[fmt.Sprint(i)] = ceremony{kind: signIn, expires: exp}
+	}
+	if _, err := c.put(now, ceremony{kind: signIn}); err != nil || len(c.byID) != maxCeremonies/2+1 {
+		t.Errorf("full of half expired: %v, %d held", err, len(c.byID))
+	}
+	if _, ok := c.byID["1"]; !ok {
+		t.Error("a live ceremony was evicted though expired ones made room")
+	}
+}
+
+func TestCeremoniesPurgeExpiredWhenNotFull(t *testing.T) {
+	var c ceremonies
+	now := time.Unix(1_800_000_000, 0)
+	for range 3 {
+		if _, err := c.put(now, ceremony{kind: signIn}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := c.put(now.Add(ceremonyLife+purgeEvery), ceremony{kind: signIn}); err != nil || len(c.byID) != 1 {
 		t.Errorf("after expiry: %v, %d held", err, len(c.byID))
 	}
 }
@@ -122,7 +241,7 @@ func TestNewPassword(t *testing.T) {
 
 func TestSignInOptions(t *testing.T) {
 	a, _, _ := newFakeAuth(t)
-	nonce, options, err := a.SignInOptions()
+	nonce, options, err := a.SignInOptions(client)
 	if err != nil || nonce == "" {
 		t.Fatal(err)
 	}
@@ -181,7 +300,7 @@ func TestUnknownPasskeysDoNotBlockTheIP(t *testing.T) {
 	a, _, _ := newFakeAuth(t)
 	ctx := context.Background()
 	for range maxPerAccountIP {
-		nonce, _, err := a.SignInOptions()
+		nonce, _, err := a.SignInOptions(client)
 		if err != nil {
 			t.Fatal(err)
 		}

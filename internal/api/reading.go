@@ -107,6 +107,14 @@ table{max-width:100%}
 </head><body>{{.HTML}}</body></html>
 `))
 
+// fromAppFrame reports whether r may ask for remote images: it carries no Fetch Metadata (an
+// older browser) or comes from the app's own iframe. A link in another message opens the URL as
+// a top-level navigation, which must not load remote images the person did not ask for.
+func fromAppFrame(r *http.Request) bool {
+	dest := r.Header.Get("Sec-Fetch-Dest")
+	return dest == "" || (dest == "iframe" && r.Header.Get("Sec-Fetch-Site") == "same-origin")
+}
+
 // body answers GET /api/body?folder=<name>&uid=<uid>[&images=1] with the rendered body as a
 // document of its own, for the reading pane's frame.
 func (a *apiHandler) body(w http.ResponseWriter, r *http.Request, s *session.Session) {
@@ -116,7 +124,7 @@ func (a *apiHandler) body(w http.ResponseWriter, r *http.Request, s *session.Ses
 		writeError(w, http.StatusBadRequest, errBadRequest)
 		return
 	}
-	images := r.URL.Query().Get("images") == "1"
+	images := r.URL.Query().Get("images") == "1" && fromAppFrame(r)
 	// An error answer is shown in the reading pane's frame too, which must be allowed to hold it.
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'self'; sandbox allow-same-origin")
 	var res render.Result

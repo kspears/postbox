@@ -41,13 +41,14 @@ func TestFromEnvOptional(t *testing.T) {
 	m["POSTBOX_STATE"] = "/tmp/state"
 	m["POSTBOX_LISTEN"] = "127.0.0.1:9000"
 	m["POSTBOX_CLIENT_IP_HEADER"] = "X-Forwarded-For"
+	m["POSTBOX_TRUSTED_PROXY"] = "172.20.0.2"
 	m["POSTBOX_CA_FILE"] = "/ca.crt"
 	m["POSTBOX_PASSKEY_KEY"] = strings.Repeat("A", 43) + "="
 	c, err := FromEnv(env(m))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.State != "/tmp/state" || c.Listen != "127.0.0.1:9000" || c.ClientIPHeader != "X-Forwarded-For" || c.CAFile != "/ca.crt" || len(c.PasskeyKey) != 32 {
+	if c.State != "/tmp/state" || c.Listen != "127.0.0.1:9000" || c.ClientIPHeader != "X-Forwarded-For" || c.TrustedProxy.String() != "172.20.0.2" || c.CAFile != "/ca.crt" || len(c.PasskeyKey) != 32 {
 		t.Errorf("got %+v", c)
 	}
 }
@@ -67,6 +68,8 @@ func TestFromEnvErrors(t *testing.T) {
 		{"url http", "POSTBOX_PUBLIC_URL", "http://mail.example.test", "POSTBOX_PUBLIC_URL must be an https:// URL"},
 		{"url lookalike", "POSTBOX_PUBLIC_URL", "http://notlocalhost", "POSTBOX_PUBLIC_URL must be an https:// URL"},
 		{"url path", "POSTBOX_PUBLIC_URL", "https://mail.example.test/mail", "POSTBOX_PUBLIC_URL must be an https:// URL"},
+		{"header without proxy", "POSTBOX_CLIENT_IP_HEADER", "X-Forwarded-For", "POSTBOX_CLIENT_IP_HEADER is set but POSTBOX_TRUSTED_PROXY is not"},
+		{"proxy a network", "POSTBOX_TRUSTED_PROXY", "172.20.0.0/16", "POSTBOX_TRUSTED_PROXY must be one IP address"},
 		{"passkey key short", "POSTBOX_PASSKEY_KEY", "c2hvcnQ=", "POSTBOX_PASSKEY_KEY must be 32 random bytes in base64"},
 		{"passkey key not base64", "POSTBOX_PASSKEY_KEY", "not base64!", "POSTBOX_PASSKEY_KEY must be 32 random bytes in base64"},
 		{"url no scheme", "POSTBOX_PUBLIC_URL", "mail.example.test", "POSTBOX_PUBLIC_URL must be an https:// URL"},
