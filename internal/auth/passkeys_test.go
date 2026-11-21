@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -88,6 +89,66 @@ func TestCeremoniesPerVisitor(t *testing.T) {
 	}
 	if _, err := c.put(now, ceremony{kind: signIn, visitor: "a"}); err != nil {
 		t.Errorf("after one finished: %v", err)
+	}
+}
+
+func TestCeremoniesVisitorCapSkipsScan(t *testing.T) {
+	var c ceremonies
+	now := time.Unix(1_800_000_000, 0)
+	for range maxCeremoniesPerVisitor {
+		if _, err := c.put(now, ceremony{kind: signIn, visitor: "a"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Long after they expired and a sweep is due, the visitor is still refused and nothing is
+	// swept: the cap is checked first.
+	later := now.Add(ceremonyLife + purgeEvery)
+	if _, err := c.put(later, ceremony{kind: signIn, visitor: "a"}); !errors.Is(err, ErrVisitorBusy) {
+		t.Errorf("over the cap: %v", err)
+	}
+	if len(c.byID) != maxCeremoniesPerVisitor {
+		t.Errorf("a refused put swept the table: %d held", len(c.byID))
+	}
+}
+
+func TestCeremoniesFullEvictsNearestExpiry(t *testing.T) {
+	var c ceremonies
+	now := time.Unix(1_800_000_000, 0)
+	c.byID, c.byVisitor = map[string]ceremony{}, map[string]int{}
+	c.purged = now
+	for i := range maxCeremonies {
+		c.byID[fmt.Sprint(i)] = ceremony{kind: signIn, expires: now.Add(time.Hour + time.Duration(i)*time.Second)}
+	}
+	c.byID["soon"] = ceremony{kind: signIn, expires: now.Add(time.Minute)}
+	delete(c.byID, "0")
+	if _, err := c.put(now, ceremony{kind: signIn}); err != nil || len(c.byID) != maxCeremonies {
+		t.Fatalf("full: %v, %d held", err, len(c.byID))
+	}
+	if _, ok := c.byID["soon"]; ok {
+		t.Error("the ceremony nearest expiry was kept")
+	}
+	if _, ok := c.byID["1"]; !ok {
+		t.Error("a later ceremony was evicted")
+	}
+}
+
+func TestCeremoniesFullPurgesExpiredFirst(t *testing.T) {
+	var c ceremonies
+	now := time.Unix(1_800_000_000, 0)
+	c.byID, c.byVisitor = map[string]ceremony{}, map[string]int{}
+	c.purged = now
+	for i := range maxCeremonies {
+		exp := now.Add(time.Hour)
+		if i%2 == 0 {
+			exp = now.Add(-time.Second)
+		}
+		c.byID[fmt.Sprint(i)] = ceremony{kind: signIn, expires: exp}
+	}
+	if _, err := c.put(now, ceremony{kind: signIn}); err != nil || len(c.byID) != maxCeremonies/2+1 {
+		t.Errorf("full of half expired: %v, %d held", err, len(c.byID))
+	}
+	if _, ok := c.byID["1"]; !ok {
+		t.Error("a live ceremony was evicted though expired ones made room")
 	}
 }
 

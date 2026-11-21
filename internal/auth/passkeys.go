@@ -106,32 +106,36 @@ type ceremonies struct {
 }
 
 func (c *ceremonies) put(now time.Time, cer ceremony) (string, error) {
+	nonce := rand.Text()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.byID == nil {
 		c.byID, c.byVisitor = map[string]ceremony{}, map[string]int{}
 	}
-	if now.Sub(c.purged) >= purgeEvery || len(c.byID) >= maxCeremonies {
-		for id, old := range c.byID {
-			if !now.Before(old.expires) {
-				c.remove(id)
-			}
-		}
-		c.purged = now
-	}
+	// Checked before any scan, so a visitor at its cap is refused in constant time; the count
+	// may include ceremonies expired since the last sweep.
 	if cer.visitor != "" && c.byVisitor[cer.visitor] >= maxCeremoniesPerVisitor {
 		return "", ErrVisitorBusy
 	}
-	if len(c.byID) >= maxCeremonies {
-		var first string
+	full := len(c.byID) >= maxCeremonies
+	if full || now.Sub(c.purged) >= purgeEvery {
+		// One pass: sweep the expired and note the live ceremony nearest its expiry.
+		var nearest string
+		var nearestExpires time.Time
 		for id, old := range c.byID {
-			if first == "" || old.expires.Before(c.byID[first].expires) {
-				first = id
+			if !now.Before(old.expires) {
+				c.remove(id)
+				continue
+			}
+			if nearest == "" || old.expires.Before(nearestExpires) {
+				nearest, nearestExpires = id, old.expires
 			}
 		}
-		c.remove(first)
+		c.purged = now
+		if len(c.byID) >= maxCeremonies {
+			c.remove(nearest)
+		}
 	}
-	nonce := rand.Text()
 	cer.expires = now.Add(ceremonyLife)
 	if cer.kind == newPassword {
 		cer.expires = now.Add(newPasswordLife)
