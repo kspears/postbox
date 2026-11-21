@@ -28,9 +28,10 @@ updates:
       npm:
         update-types: [minor, patch]
 
-  # Base images pinned by tag and digest: the release image and the test stack's.
+  # Base images pinned by tag and digest: the release image and the test postfix. The e2e
+  # image is Playwright, which moves with @playwright/test by hand.
   - package-ecosystem: docker
-    directories: [/, /e2e, /deploy/ci/postfix]
+    directories: [/, /deploy/ci/postfix]
     schedule:
       interval: weekly
     cooldown:
